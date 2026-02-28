@@ -1,0 +1,41 @@
+# Render Blueprint - Prometheus LinkedIn Campaign Analyzer
+# Deploy with: render blueprint apply
+
+services:
+  - type: web
+    name: prometheus-linkedin
+    runtime: node
+    region: singapore  # Closest to India
+    plan: free  # Can upgrade to starter ($7/mo) for always-on
+    buildCommand: npm install && cd frontend && npm install && npm run build && cd ../server && npm install && npm run build
+    startCommand: cd server && NODE_ENV=production node dist/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      # Auth - set these in Render dashboard
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true  # Auto-generate a secure secret
+      # LinkedIn OAuth - set in dashboard
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_AD_ACCOUNT_ID
+        sync: false
+      - key: LINKEDIN_REDIRECT_URI
+        sync: false  # Set to https://your-app.onrender.com/callback
+      # OpenAI
+      - key: OPENAI_API_KEY
+        sync: false
+      # Slack Alerts (optional)
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: COST_ALERT_THRESHOLD
+        value: "500"
