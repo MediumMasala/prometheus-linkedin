@@ -49,8 +49,8 @@ app.use(express.json());
 
 // Apply auth middleware to all /api routes except login and health
 app.use('/api', (req, res, next) => {
-  // Skip auth for these routes
-  const publicRoutes = ['/api/auth/login', '/api/health', '/api/linkedin/auth-url', '/api/linkedin/token', '/api/linkedin/set-token'];
+  // Skip auth for these routes (use req.path which is relative to /api mount point)
+  const publicRoutes = ['/auth/login', '/health', '/linkedin/auth-url', '/linkedin/token', '/linkedin/set-token'];
   if (publicRoutes.includes(req.path)) {
     return next();
   }
