@@ -301,7 +301,7 @@ export const analyzeCampaignCostTool = createTool({
     const results = await generateAIAnalysis(breachedCampaigns as BreachedCampaign[]);
 
     // Determine if we used AI or fallback
-    const analysisMethod = getOpenAIKey() ? 'ai' : 'fallback';
+    const analysisMethod: 'ai' | 'fallback' = getOpenAIKey() ? 'ai' : 'fallback';
 
     console.log(`[AnalyzeCost] Generated ${results.length} analysis results using ${analysisMethod}`);
 
