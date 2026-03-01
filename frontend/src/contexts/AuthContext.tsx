@@ -1,9 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
+export type UserRole = 'admin' | 'viewer';
+
+export interface User {
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   token: string | null;
+  user: User | null;
+  isAdmin: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
@@ -11,9 +21,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const TOKEN_KEY = 'prometheus_auth_token';
+const USER_KEY = 'prometheus_user';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [, setAuthDisabled] = useState(false);
 
@@ -37,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Normal auth flow
       const savedToken = localStorage.getItem(TOKEN_KEY);
+      const savedUser = localStorage.getItem(USER_KEY);
       if (savedToken) {
         // Verify token is still valid
         const valid = await verifyToken(savedToken);
@@ -44,8 +57,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Set globally BEFORE state update
           (window as any).__prometheusAuthToken = savedToken;
           setToken(savedToken);
+          if (savedUser) {
+            try {
+              setUser(JSON.parse(savedUser));
+            } catch (e) {
+              // Ignore invalid user data
+            }
+          }
         } else {
           localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
         }
       }
       setIsLoading(false);
@@ -82,6 +103,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         (window as any).__prometheusAuthToken = data.token;
         localStorage.setItem(TOKEN_KEY, data.token);
         setToken(data.token);
+
+        // Save user info if provided
+        if (data.user) {
+          localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+          setUser(data.user);
+        }
+
         return { success: true };
       } else {
         return { success: false, error: data.error || 'Login failed' };
@@ -93,7 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     setToken(null);
+    setUser(null);
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   }, []);
 
   // Add token to all fetch requests
@@ -112,6 +142,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!token,
         isLoading,
         token,
+        user,
+        isAdmin: user?.role === 'admin',
         login,
         logout,
       }}

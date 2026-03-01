@@ -9,7 +9,16 @@ import { fetchLinkedInCampaignsTool } from './mastra/tools/fetchLinkedInCampaign
 import { batchCampaignsTool } from './mastra/tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './mastra/tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './mastra/tools/mapAndReconcile.js';
-import { login, authMiddleware, type AuthRequest } from './lib/auth.js';
+import { login, authMiddleware, requireAdmin, type AuthRequest } from './lib/auth.js';
+import {
+  getAllUsers,
+  createUser,
+  updateUserRole,
+  updateUserPassword,
+  deleteUser,
+  getUserStats,
+  type UserRole,
+} from './lib/users.js';
 import {
   checkAndAlertHighCosts,
   sendDailySummary,
@@ -105,14 +114,20 @@ function saveToken(token: string) {
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password required' });
+  // Support both 'username' and 'email' field names
+  const email = username || req.body.email;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password required' });
   }
 
-  const result = login(username, password);
+  const result = login(email, password);
 
   if (result.success) {
-    res.json({ token: result.token });
+    res.json({
+      token: result.token,
+      user: result.user,
+    });
   } else {
     res.status(401).json({ error: result.error });
   }
@@ -121,6 +136,97 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/auth/verify', (req: AuthRequest, res) => {
   // If we get here, the auth middleware has already verified the token
   res.json({ valid: true, user: req.user });
+});
+
+// ============== User Management Routes (Admin Only) ==============
+
+// Get all users
+app.get('/api/users', requireAdmin, (req: AuthRequest, res) => {
+  const users = getAllUsers();
+  const stats = getUserStats();
+  res.json({ users, stats });
+});
+
+// Create new user
+app.post('/api/users', requireAdmin, (req: AuthRequest, res) => {
+  const { email, password, role } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  const validRoles: UserRole[] = ['admin', 'viewer'];
+  if (role && !validRoles.includes(role)) {
+    return res.status(400).json({ error: 'Invalid role. Must be admin or viewer' });
+  }
+
+  const result = createUser(
+    email,
+    password,
+    role || 'viewer',
+    req.user?.email || 'unknown'
+  );
+
+  if (result.success) {
+    res.json({ success: true, user: result.user });
+  } else {
+    res.status(400).json({ error: result.error });
+  }
+});
+
+// Update user role
+app.patch('/api/users/:userId/role', requireAdmin, (req: AuthRequest, res) => {
+  const { userId } = req.params;
+  const { role } = req.body;
+
+  const validRoles: UserRole[] = ['admin', 'viewer'];
+  if (!role || !validRoles.includes(role)) {
+    return res.status(400).json({ error: 'Invalid role. Must be admin or viewer' });
+  }
+
+  const result = updateUserRole(userId, role);
+
+  if (result.success) {
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: result.error });
+  }
+});
+
+// Update user password (admin can reset any user's password)
+app.patch('/api/users/:userId/password', requireAdmin, (req: AuthRequest, res) => {
+  const { userId } = req.params;
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  const result = updateUserPassword(userId, password);
+
+  if (result.success) {
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: result.error });
+  }
+});
+
+// Delete user
+app.delete('/api/users/:userId', requireAdmin, (req: AuthRequest, res) => {
+  const { userId } = req.params;
+
+  // Prevent self-deletion
+  if (req.user?.id === userId) {
+    return res.status(400).json({ error: 'Cannot delete your own account' });
+  }
+
+  const result = deleteUser(userId);
+
+  if (result.success) {
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: result.error });
+  }
 });
 
 // ============== LinkedIn OAuth Routes ==============

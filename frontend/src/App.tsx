@@ -9,6 +9,7 @@ import { CampaignPerformance } from './components/CampaignPerformance';
 import { LinkedInDashboard } from './components/LinkedInDashboard';
 import { CampaignROI } from './components/CampaignROI';
 import { LoginPage } from './components/LoginPage';
+import { Settings } from './components/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { fetchJobApplications } from './services/api';
 import type { JobApplication } from './types';
@@ -22,6 +23,7 @@ const SIDEBAR_TABS = [
   { id: 'round-one-ads', label: 'Round One Ads', icon: 'chart' },
   { id: 'tal-ads', label: 'Tal Ads', icon: 'megaphone' },
   { id: 'tal-character-marketing', label: 'Tal Character Marketing', icon: 'users' },
+  { id: 'settings', label: 'Settings', icon: 'settings', adminOnly: true },
 ];
 
 // Sub-tabs for Round One Ads section
@@ -33,7 +35,7 @@ const ROUND_ONE_TABS = [
 ];
 
 function AppContent() {
-  const { isAuthenticated, isLoading: authLoading, logout } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, logout, isAdmin, user } = useAuth();
   const [activeSidebarTab, setActiveSidebarTab] = useState('round-one-ads');
   const [activeSubTab, setActiveSubTab] = useState('roi'); // Default to Campaign ROI within Round One
   const [applications, setApplications] = useState<JobApplication[]>([]);
@@ -107,10 +109,23 @@ function AppContent() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
         );
+      case 'settings':
+        return (
+          <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        );
       default:
         return null;
     }
   };
+
+  // Filter tabs based on admin status
+  const visibleSidebarTabs = SIDEBAR_TABS.filter(tab => {
+    if ((tab as any).adminOnly && !isAdmin) return false;
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -135,7 +150,7 @@ function AppContent() {
         {/* Navigation */}
         <nav className="flex-1 p-4">
           <ul className="space-y-1">
-            {SIDEBAR_TABS.map((tab) => (
+            {visibleSidebarTabs.map((tab) => (
               <li key={tab.id}>
                 <button
                   onClick={() => setActiveSidebarTab(tab.id)}
@@ -171,9 +186,21 @@ function AppContent() {
       <div className="flex-1 flex flex-col min-h-screen">
         {/* Page Header */}
         <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <h2 className="text-xl font-semibold text-gray-900">
-            {SIDEBAR_TABS.find(t => t.id === activeSidebarTab)?.label}
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {SIDEBAR_TABS.find(t => t.id === activeSidebarTab)?.label}
+            </h2>
+            {user && (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span>{user.email}</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  user.role === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {user.role}
+                </span>
+              </div>
+            )}
+          </div>
         </header>
 
         {/* Round One Ads - Sub Tabs */}
@@ -291,6 +318,11 @@ function AppContent() {
                 <p className="text-gray-500">Coming soon</p>
               </div>
             </div>
+          )}
+
+          {/* Settings - Admin Only */}
+          {activeSidebarTab === 'settings' && (
+            <Settings />
           )}
         </main>
 
