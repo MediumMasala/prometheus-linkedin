@@ -472,7 +472,7 @@ export function CampaignROI(_props: CampaignROIProps) {
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
         {error || 'No data available'}
         <button
-          onClick={loadData}
+          onClick={() => loadData()}
           className="ml-4 px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
         >
           Retry

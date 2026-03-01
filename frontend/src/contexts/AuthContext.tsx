@@ -15,7 +15,7 @@ const TOKEN_KEY = 'prometheus_auth_token';
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [authDisabled, setAuthDisabled] = useState(false);
+  const [, setAuthDisabled] = useState(false);
 
   // Check for existing token on mount OR if auth is disabled
   useEffect(() => {
