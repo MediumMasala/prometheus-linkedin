@@ -957,16 +957,11 @@ async function runEndOfDaySummary() {
   }
 }
 
-// Schedule: 8:30 AM IST - Morning Summary (Yesterday's data)
-cron.schedule('30 8 * * *', runMorningSummary, { timezone: 'Asia/Kolkata' });
+// Schedule: Check every 3 hours during work hours (9 AM to 9 PM IST)
+// Only sends alert if there are critical campaigns (CPR > ₹400 or 0 resumes with high spend)
+cron.schedule('0 9,12,15,18,21 * * *', runStatusUpdate, { timezone: 'Asia/Kolkata' });
 
-// Schedule: 12 PM, 3 PM, 6 PM, 9 PM IST - Status Updates with Alerts
-cron.schedule('0 12,15,18,21 * * *', runStatusUpdate, { timezone: 'Asia/Kolkata' });
-
-// Schedule: Midnight IST - End of Day Summary
-cron.schedule('0 0 * * *', runEndOfDaySummary, { timezone: 'Asia/Kolkata' });
-
-console.log(`📅 Scheduled Reports: 8:30 AM (morning), 12/3/6/9 PM (status), 12 AM (EOD)`);
+console.log(`📅 Scheduled Alerts: Every 3 hours (9 AM - 9 PM IST) - only alerts if campaigns exceed threshold`);
 
 // ============== Test Endpoints for Scheduled Reports ==============
 

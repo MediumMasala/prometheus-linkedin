@@ -628,27 +628,30 @@ export async function sendMorningSummary(data: ScheduledReportData): Promise<boo
 }
 
 /**
- * 12 PM, 3 PM, 6 PM, 9 PM - Status Update with Alerts
+ * Status Update - Only sends if there are critical campaigns
+ * Critical = CPR > threshold OR zero resumes with significant spend
  */
 export async function sendStatusUpdate(data: ScheduledReportData): Promise<boolean> {
   const threshold = getAlertThreshold();
   const time = getISTTime();
-  const totalResumes = data.paidResumes + data.organicResumes;
 
-  // Separate alerts and on-track campaigns
-  const alertCampaigns = data.campaigns.filter(
+  // Find critical campaigns
+  const criticalCampaigns = data.campaigns.filter(
     c => (c.paidResumes === 0 && c.spend >= 500) || (c.paidResumes > 0 && c.costPerResume > threshold)
-  );
-  const onTrackCampaigns = data.campaigns.filter(
-    c => c.paidResumes > 0 && c.costPerResume <= threshold
-  ).sort((a, b) => a.costPerResume - b.costPerResume);
+  ).sort((a, b) => b.costPerResume - a.costPerResume); // Worst first
+
+  // If no critical campaigns, don't send anything
+  if (criticalCampaigns.length === 0) {
+    console.log('[Slack] No critical campaigns - skipping alert');
+    return true;
+  }
 
   const blocks: any[] = [
     {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `🕐 Campaign Status Update (${time} IST)`,
+        text: `🚨 Campaign Alert (${time} IST)`,
         emoji: true,
       },
     },
@@ -656,94 +659,49 @@ export async function sendStatusUpdate(data: ScheduledReportData): Promise<boole
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*📈 Today's Progress*\n━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        text: `*${criticalCampaigns.length} campaign(s)* need attention — CPR exceeds *${formatINR(threshold)}* threshold.`,
       },
-    },
-    {
-      type: 'section',
-      fields: [
-        { type: 'mrkdwn', text: `*Spend So Far*\n${formatINR(data.totalSpend)}` },
-        { type: 'mrkdwn', text: `*Resumes*\n${totalResumes}` },
-        { type: 'mrkdwn', text: `*Paid | Organic*\n${data.paidResumes} | ${data.organicResumes}` },
-        { type: 'mrkdwn', text: `*Current CPR*\n${data.paidResumes > 0 ? formatINR(data.avgCostPerResume) : 'N/A'}` },
-      ],
     },
     { type: 'divider' },
   ];
 
-  // Alerts section
-  if (alertCampaigns.length > 0) {
+  // List critical campaigns
+  for (const c of criticalCampaigns.slice(0, 8)) {
+    const status = c.paidResumes === 0
+      ? `${formatINR(c.spend)} spent, *0 resumes* ❌`
+      : `*${formatINR(c.costPerResume)}*/resume (${c.paidResumes} resumes) ⚠️`;
+
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*🚨 ALERTS (CPR > ${formatINR(threshold)})*`,
+        text: `*${c.company} - ${c.role}*\n${status}`,
       },
     });
+  }
 
-    for (const c of alertCampaigns.slice(0, 5)) {
-      const status = c.paidResumes === 0 ? '❌ 0 resumes' : `⚠️ ${formatINR(c.costPerResume)}/resume`;
-      blocks.push({
-        type: 'section',
-        text: {
+  if (criticalCampaigns.length > 8) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `_...and ${criticalCampaigns.length - 8} more_` }],
+    });
+  }
+
+  blocks.push(
+    { type: 'divider' },
+    {
+      type: 'context',
+      elements: [
+        {
           type: 'mrkdwn',
-          text: `• *${c.company} - ${c.role}*: ${formatINR(c.spend)} spent, ${status}`,
+          text: `💡 Consider reducing bids or pausing these campaigns | _Prometheus_`,
         },
-      });
+      ],
     }
-
-    if (alertCampaigns.length > 5) {
-      blocks.push({
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: `_...and ${alertCampaigns.length - 5} more campaigns need attention_` }],
-      });
-    }
-
-    blocks.push({ type: 'divider' });
-  }
-
-  // On track section
-  if (onTrackCampaigns.length > 0) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*✅ On Track*\n` +
-          onTrackCampaigns
-            .slice(0, 3)
-            .map(c => `• ${c.company} - ${c.role}: ${formatINR(c.costPerResume)}/resume (${c.paidResumes} resumes)`)
-            .join('\n'),
-      },
-    });
-  }
-
-  // No alerts message
-  if (alertCampaigns.length === 0) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `✅ *All campaigns are within budget!*`,
-      },
-    });
-  }
-
-  blocks.push({
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: `_Threshold: ${formatINR(threshold)}/resume | Prometheus_`,
-      },
-    ],
-  });
-
-  const alertText = alertCampaigns.length > 0
-    ? `🚨 ${alertCampaigns.length} alert(s)`
-    : '✅ All on track';
+  );
 
   return sendSlackMessage({
-    text: `🕐 Status Update: ${formatINR(data.totalSpend)} spent, ${totalResumes} resumes | ${alertText}`,
+    text: `🚨 ${criticalCampaigns.length} campaign(s) exceed ${formatINR(threshold)}/resume - please review`,
     blocks,
   });
 }
