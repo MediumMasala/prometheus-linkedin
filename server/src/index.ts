@@ -10,7 +10,17 @@ import { batchCampaignsTool } from './mastra/tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './mastra/tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './mastra/tools/mapAndReconcile.js';
 import { login, authMiddleware, type AuthRequest } from './lib/auth.js';
-import { checkAndAlertHighCosts, sendDailySummary, getAlertThreshold, checkDailyCosts, checkCampaignCosts } from './lib/slack.js';
+import {
+  checkAndAlertHighCosts,
+  sendDailySummary,
+  getAlertThreshold,
+  checkDailyCosts,
+  checkCampaignCosts,
+  sendMorningSummary,
+  sendStatusUpdate,
+  sendEndOfDaySummary,
+  type ScheduledReportData,
+} from './lib/slack.js';
 import { runCampaignCostMonitor, getMonitorStatus, ALERT_CONFIG } from './workflows/campaign-cost-monitor/index.js';
 import {
   exportRules,
@@ -787,6 +797,217 @@ setTimeout(() => {
   console.log('\n[Monitor] Running initial check...');
   runIntelligentCostMonitor();
 }, 30000);
+
+// ============== SCHEDULED SLACK REPORTS ==============
+
+/**
+ * Fetch report data for a specific date
+ */
+async function fetchReportData(dateStr: string): Promise<ScheduledReportData | null> {
+  if (!accessToken) {
+    console.log('[ScheduledReport] Skipping - LinkedIn not connected');
+    return null;
+  }
+
+  try {
+    const result = await runPrometheusAnalysis({
+      linkedInAccountId: LINKEDIN_AD_ACCOUNT_ID!,
+      linkedInAccessToken: accessToken,
+      dateRange: { start: dateStr, end: dateStr },
+    });
+
+    if (!result || !result.batches) {
+      console.error('[ScheduledReport] Failed to fetch data');
+      return null;
+    }
+
+    const { batches: batchData, internal } = result;
+
+    // Calculate totals
+    let totalSpend = 0;
+    let paidResumes = 0;
+    let organicResumes = 0;
+    const campaigns: ScheduledReportData['campaigns'] = [];
+
+    for (const batch of batchData.batches) {
+      const spend = batch.aggregatedMetrics?.totalSpend || 0;
+      totalSpend += spend;
+
+      // Find matching internal data
+      const internalMatch = internal?.roles?.find(
+        (r: any) => r.companyName?.toLowerCase() === batch.company?.toLowerCase() &&
+                    r.jobTitle?.toLowerCase().includes(batch.role?.toLowerCase().substring(0, 10))
+      );
+
+      const paid = internalMatch?.resumes || 0;
+      paidResumes += paid;
+
+      campaigns.push({
+        company: batch.company || 'Unknown',
+        role: batch.role || 'Unknown',
+        spend,
+        paidResumes: paid,
+        costPerResume: paid > 0 ? spend / paid : 0,
+      });
+    }
+
+    // Calculate organic from internal data
+    if (internal?.roles) {
+      const totalInternal = internal.roles.reduce((sum: number, r: any) => sum + (r.resumes || 0), 0);
+      organicResumes = Math.max(0, totalInternal - paidResumes);
+    }
+
+    const avgCostPerResume = paidResumes > 0 ? totalSpend / paidResumes : 0;
+
+    return {
+      date: dateStr,
+      totalSpend,
+      paidResumes,
+      organicResumes,
+      avgCostPerResume,
+      campaigns,
+    };
+  } catch (error) {
+    console.error('[ScheduledReport] Error fetching data:', error);
+    return null;
+  }
+}
+
+/**
+ * Get yesterday's date string (IST)
+ */
+function getYesterdayIST(): string {
+  const now = new Date();
+  // Convert to IST
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
+  istNow.setDate(istNow.getDate() - 1);
+  return istNow.toISOString().split('T')[0];
+}
+
+/**
+ * Get today's date string (IST)
+ */
+function getTodayIST(): string {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset);
+  return istNow.toISOString().split('T')[0];
+}
+
+/**
+ * 8:30 AM - Morning Summary (Yesterday's data)
+ */
+async function runMorningSummary() {
+  console.log('[ScheduledReport] ☀️ Running Morning Summary...');
+
+  if (!process.env.SLACK_WEBHOOK_URL) {
+    console.log('[ScheduledReport] Skipping - Slack not configured');
+    return;
+  }
+
+  const yesterday = getYesterdayIST();
+  const data = await fetchReportData(yesterday);
+
+  if (data) {
+    await sendMorningSummary(data);
+    console.log('[ScheduledReport] ☀️ Morning Summary sent');
+  }
+}
+
+/**
+ * 12 PM, 3 PM, 6 PM, 9 PM - Status Update with Alerts
+ */
+async function runStatusUpdate() {
+  const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+  console.log(`[ScheduledReport] 🕐 Running Status Update at ${time}...`);
+
+  if (!process.env.SLACK_WEBHOOK_URL) {
+    console.log('[ScheduledReport] Skipping - Slack not configured');
+    return;
+  }
+
+  const today = getTodayIST();
+  const data = await fetchReportData(today);
+
+  if (data) {
+    await sendStatusUpdate(data);
+    console.log('[ScheduledReport] 🕐 Status Update sent');
+  }
+}
+
+/**
+ * Midnight - End of Day Summary
+ */
+async function runEndOfDaySummary() {
+  console.log('[ScheduledReport] 🌙 Running End of Day Summary...');
+
+  if (!process.env.SLACK_WEBHOOK_URL) {
+    console.log('[ScheduledReport] Skipping - Slack not configured');
+    return;
+  }
+
+  // At midnight, we want to summarize the day that just ended
+  const yesterday = getYesterdayIST();
+  const data = await fetchReportData(yesterday);
+
+  if (data) {
+    await sendEndOfDaySummary(data);
+    console.log('[ScheduledReport] 🌙 End of Day Summary sent');
+  }
+}
+
+// Schedule: 8:30 AM IST - Morning Summary (Yesterday's data)
+cron.schedule('30 8 * * *', runMorningSummary, { timezone: 'Asia/Kolkata' });
+
+// Schedule: 12 PM, 3 PM, 6 PM, 9 PM IST - Status Updates with Alerts
+cron.schedule('0 12,15,18,21 * * *', runStatusUpdate, { timezone: 'Asia/Kolkata' });
+
+// Schedule: Midnight IST - End of Day Summary
+cron.schedule('0 0 * * *', runEndOfDaySummary, { timezone: 'Asia/Kolkata' });
+
+console.log(`📅 Scheduled Reports: 8:30 AM (morning), 12/3/6/9 PM (status), 12 AM (EOD)`);
+
+// ============== Test Endpoints for Scheduled Reports ==============
+
+app.post('/api/prometheus/test-morning-summary', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'LinkedIn not connected' });
+  }
+
+  try {
+    await runMorningSummary();
+    res.json({ success: true, message: 'Morning summary sent to Slack' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send morning summary' });
+  }
+});
+
+app.post('/api/prometheus/test-status-update', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'LinkedIn not connected' });
+  }
+
+  try {
+    await runStatusUpdate();
+    res.json({ success: true, message: 'Status update sent to Slack' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send status update' });
+  }
+});
+
+app.post('/api/prometheus/test-eod-summary', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'LinkedIn not connected' });
+  }
+
+  try {
+    await runEndOfDaySummary();
+    res.json({ success: true, message: 'End of day summary sent to Slack' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send EOD summary' });
+  }
+});
 
 // ============== Monitor Status Endpoint ==============
 

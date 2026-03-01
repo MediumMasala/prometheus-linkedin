@@ -498,3 +498,321 @@ export async function sendDailySummary(data: {
     blocks,
   });
 }
+
+// ============================================
+// SCHEDULED REPORTS - Morning, Status, EOD
+// ============================================
+
+export interface ScheduledReportData {
+  date: string;
+  totalSpend: number;
+  paidResumes: number;
+  organicResumes: number;
+  avgCostPerResume: number;
+  campaigns: Array<{
+    company: string;
+    role: string;
+    spend: number;
+    paidResumes: number;
+    costPerResume: number;
+  }>;
+}
+
+// Get current time in IST formatted nicely
+function getISTTime(): string {
+  return new Date().toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Get date string in readable format
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-IN', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
+ * 8:30 AM - Yesterday's Expense Summary
+ */
+export async function sendMorningSummary(data: ScheduledReportData): Promise<boolean> {
+  const threshold = getAlertThreshold();
+
+  // Get top and worst performers
+  const campaignsWithResumes = data.campaigns.filter(c => c.paidResumes > 0);
+  const topPerformers = [...campaignsWithResumes]
+    .sort((a, b) => a.costPerResume - b.costPerResume)
+    .slice(0, 3);
+  const worstPerformers = [...campaignsWithResumes]
+    .sort((a, b) => b.costPerResume - a.costPerResume)
+    .slice(0, 3);
+
+  const totalResumes = data.paidResumes + data.organicResumes;
+
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `☀️ Good Morning! Yesterday's Expense Summary`,
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📊 ${formatDate(data.date)} - Aggregate*\n━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Total Spend*\n${formatINR(data.totalSpend)}` },
+        { type: 'mrkdwn', text: `*Total Resumes*\n${totalResumes}` },
+        { type: 'mrkdwn', text: `*Paid | Organic*\n${data.paidResumes} | ${data.organicResumes}` },
+        { type: 'mrkdwn', text: `*Avg CPR*\n${data.paidResumes > 0 ? formatINR(data.avgCostPerResume) : 'N/A'}` },
+      ],
+    },
+    { type: 'divider' },
+  ];
+
+  // Top Performers
+  if (topPerformers.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*🏆 Top Performers (Lowest CPR)*\n` +
+          topPerformers
+            .map(c => `• ${c.company} - ${c.role}: *${formatINR(c.costPerResume)}*/resume (${c.paidResumes} resumes)`)
+            .join('\n'),
+      },
+    });
+  }
+
+  // Worst Performers
+  if (worstPerformers.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*⚠️ Underperformers (Highest CPR)*\n` +
+          worstPerformers
+            .map(c => `• ${c.company} - ${c.role}: *${formatINR(c.costPerResume)}*/resume (${c.paidResumes} resumes)`)
+            .join('\n'),
+      },
+    });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `_Threshold: ${formatINR(threshold)}/resume | Sent by Prometheus_`,
+      },
+    ],
+  });
+
+  return sendSlackMessage({
+    text: `☀️ Yesterday's Summary: ${formatINR(data.totalSpend)} spent, ${totalResumes} resumes`,
+    blocks,
+  });
+}
+
+/**
+ * 12 PM, 3 PM, 6 PM, 9 PM - Status Update with Alerts
+ */
+export async function sendStatusUpdate(data: ScheduledReportData): Promise<boolean> {
+  const threshold = getAlertThreshold();
+  const time = getISTTime();
+  const totalResumes = data.paidResumes + data.organicResumes;
+
+  // Separate alerts and on-track campaigns
+  const alertCampaigns = data.campaigns.filter(
+    c => (c.paidResumes === 0 && c.spend >= 500) || (c.paidResumes > 0 && c.costPerResume > threshold)
+  );
+  const onTrackCampaigns = data.campaigns.filter(
+    c => c.paidResumes > 0 && c.costPerResume <= threshold
+  ).sort((a, b) => a.costPerResume - b.costPerResume);
+
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `🕐 Campaign Status Update (${time} IST)`,
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📈 Today's Progress*\n━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Spend So Far*\n${formatINR(data.totalSpend)}` },
+        { type: 'mrkdwn', text: `*Resumes*\n${totalResumes}` },
+        { type: 'mrkdwn', text: `*Paid | Organic*\n${data.paidResumes} | ${data.organicResumes}` },
+        { type: 'mrkdwn', text: `*Current CPR*\n${data.paidResumes > 0 ? formatINR(data.avgCostPerResume) : 'N/A'}` },
+      ],
+    },
+    { type: 'divider' },
+  ];
+
+  // Alerts section
+  if (alertCampaigns.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*🚨 ALERTS (CPR > ${formatINR(threshold)})*`,
+      },
+    });
+
+    for (const c of alertCampaigns.slice(0, 5)) {
+      const status = c.paidResumes === 0 ? '❌ 0 resumes' : `⚠️ ${formatINR(c.costPerResume)}/resume`;
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `• *${c.company} - ${c.role}*: ${formatINR(c.spend)} spent, ${status}`,
+        },
+      });
+    }
+
+    if (alertCampaigns.length > 5) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_...and ${alertCampaigns.length - 5} more campaigns need attention_` }],
+      });
+    }
+
+    blocks.push({ type: 'divider' });
+  }
+
+  // On track section
+  if (onTrackCampaigns.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*✅ On Track*\n` +
+          onTrackCampaigns
+            .slice(0, 3)
+            .map(c => `• ${c.company} - ${c.role}: ${formatINR(c.costPerResume)}/resume (${c.paidResumes} resumes)`)
+            .join('\n'),
+      },
+    });
+  }
+
+  // No alerts message
+  if (alertCampaigns.length === 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `✅ *All campaigns are within budget!*`,
+      },
+    });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `_Threshold: ${formatINR(threshold)}/resume | Prometheus_`,
+      },
+    ],
+  });
+
+  const alertText = alertCampaigns.length > 0
+    ? `🚨 ${alertCampaigns.length} alert(s)`
+    : '✅ All on track';
+
+  return sendSlackMessage({
+    text: `🕐 Status Update: ${formatINR(data.totalSpend)} spent, ${totalResumes} resumes | ${alertText}`,
+    blocks,
+  });
+}
+
+/**
+ * Midnight - End of Day Summary
+ */
+export async function sendEndOfDaySummary(data: ScheduledReportData): Promise<boolean> {
+  const threshold = getAlertThreshold();
+  const totalResumes = data.paidResumes + data.organicResumes;
+
+  // Calculate campaign stats
+  const campaignsWithResumes = data.campaigns.filter(c => c.paidResumes > 0);
+  const withinBudget = campaignsWithResumes.filter(c => c.costPerResume <= threshold);
+  const overBudget = campaignsWithResumes.filter(c => c.costPerResume > threshold);
+
+  const withinBudgetPercent = campaignsWithResumes.length > 0
+    ? Math.round((withinBudget.length / campaignsWithResumes.length) * 100)
+    : 0;
+
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `🌙 End of Day Summary - ${formatDate(data.date)}`,
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📊 Final Numbers*\n━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Total Spend*\n${formatINR(data.totalSpend)}` },
+        { type: 'mrkdwn', text: `*Total Resumes*\n${totalResumes}` },
+        { type: 'mrkdwn', text: `*Paid | Organic*\n${data.paidResumes} | ${data.organicResumes}` },
+        { type: 'mrkdwn', text: `*Final CPR*\n${data.paidResumes > 0 ? formatINR(data.avgCostPerResume) : 'N/A'}` },
+      ],
+    },
+    { type: 'divider' },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📉 Day Performance*\n` +
+          `• Campaigns Run: ${data.campaigns.length}\n` +
+          `• Within Budget: ${withinBudget.length} (${withinBudgetPercent}%)\n` +
+          `• Over Budget: ${overBudget.length} (${100 - withinBudgetPercent}%)`,
+      },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `_See you tomorrow! 🚀 | Prometheus_`,
+        },
+      ],
+    },
+  ];
+
+  return sendSlackMessage({
+    text: `🌙 EOD Summary: ${formatINR(data.totalSpend)} spent, ${totalResumes} resumes, ${withinBudgetPercent}% within budget`,
+    blocks,
+  });
+}
