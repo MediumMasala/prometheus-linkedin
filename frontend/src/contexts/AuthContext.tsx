@@ -41,6 +41,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Verify token is still valid
         const valid = await verifyToken(savedToken);
         if (valid) {
+          // Set globally BEFORE state update
+          (window as any).__prometheusAuthToken = savedToken;
           setToken(savedToken);
         } else {
           localStorage.removeItem(TOKEN_KEY);
@@ -76,8 +78,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await response.json();
 
       if (response.ok && data.token) {
-        setToken(data.token);
+        // Set token globally IMMEDIATELY (before state update triggers re-render)
+        (window as any).__prometheusAuthToken = data.token;
         localStorage.setItem(TOKEN_KEY, data.token);
+        setToken(data.token);
         return { success: true };
       } else {
         return { success: false, error: data.error || 'Login failed' };
