@@ -636,9 +636,10 @@ export async function sendStatusUpdate(data: ScheduledReportData): Promise<boole
   const time = getISTTime();
 
   // Find critical campaigns
+  // Zero resumes with ₹400+ spend OR CPR > threshold
   const criticalCampaigns = data.campaigns.filter(
-    c => (c.paidResumes === 0 && c.spend >= 500) || (c.paidResumes > 0 && c.costPerResume > threshold)
-  ).sort((a, b) => b.costPerResume - a.costPerResume); // Worst first
+    c => (c.paidResumes === 0 && c.spend >= threshold) || (c.paidResumes > 0 && c.costPerResume > threshold)
+  ).sort((a, b) => b.spend - a.spend); // Highest spend first for zero-resume campaigns
 
   // If no critical campaigns, don't send anything
   if (criticalCampaigns.length === 0) {
