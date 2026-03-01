@@ -149,11 +149,12 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
 
   const response = await fetch(url, { ...options, headers });
 
-  // If unauthorized, clear token
-  if (response.status === 401) {
+  // If unauthorized on a non-login request, clear token and redirect
+  // But don't reload in a loop - only clear and let React handle it
+  if (response.status === 401 && !url.includes('/auth/login')) {
     localStorage.removeItem(TOKEN_KEY);
     delete (window as any).__prometheusAuthToken;
-    window.location.reload();
+    // Don't reload - the auth state change will trigger re-render to login page
   }
 
   return response;

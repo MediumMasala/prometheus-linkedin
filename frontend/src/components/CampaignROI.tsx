@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { JobApplication } from '../types';
-import { authFetch } from '../contexts/AuthContext';
+import { authFetch, useAuth } from '../contexts/AuthContext';
 
 // Mapping info type (from backend)
 interface MappingInfo {
@@ -173,6 +173,7 @@ function getDateString(date: Date): string {
 }
 
 export function CampaignROI(_props: CampaignROIProps) {
+  const { token } = useAuth();
   const [data, setData] = useState<PrometheusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -202,8 +203,9 @@ export function CampaignROI(_props: CampaignROIProps) {
     setEndDate(getDateString(today));
   }, []);
 
-  // Fetch mappings on mount
+  // Fetch mappings only when token is available
   const fetchMappings = useCallback(async () => {
+    if (!token) return; // Wait for auth
     try {
       const response = await authFetch('/api/prometheus/mappings');
       if (response.ok) {
@@ -213,11 +215,13 @@ export function CampaignROI(_props: CampaignROIProps) {
     } catch (err) {
       console.error('Error fetching mappings:', err);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
-    fetchMappings();
-  }, [fetchMappings]);
+    if (token) {
+      fetchMappings();
+    }
+  }, [token, fetchMappings]);
 
   // Show feedback toast
   const showFeedback = (type: 'success' | 'error', message: string) => {
@@ -374,12 +378,13 @@ export function CampaignROI(_props: CampaignROIProps) {
   };
 
   useEffect(() => {
-    if (startDate && endDate) {
+    if (token && startDate && endDate) {
       loadData();
     }
-  }, [startDate, endDate]);
+  }, [token, startDate, endDate]);
 
   const loadData = async (forceRefresh = false) => {
+    if (!token) return; // Wait for auth
     setIsLoading(true);
     setError(null);
 
