@@ -635,14 +635,19 @@ export async function sendStatusUpdate(data: ScheduledReportData): Promise<boole
   const threshold = getAlertThreshold();
   const time = getISTTime();
 
-  // Find critical campaigns
-  // Zero resumes with ₹400+ spend OR CPR > threshold
-  const criticalCampaigns = data.campaigns.filter(
-    c => (c.paidResumes === 0 && c.spend >= threshold) || (c.paidResumes > 0 && c.costPerResume > threshold)
-  ).sort((a, b) => b.spend - a.spend); // Highest spend first for zero-resume campaigns
+  // Separate zero-resume campaigns from high-CPR campaigns
+  const zeroResumeCampaigns = data.campaigns
+    .filter(c => c.paidResumes === 0 && c.spend >= threshold)
+    .sort((a, b) => b.spend - a.spend); // Highest spend first
+
+  const highCPRCampaigns = data.campaigns
+    .filter(c => c.paidResumes > 0 && c.costPerResume > threshold)
+    .sort((a, b) => b.costPerResume - a.costPerResume); // Highest CPR first
+
+  const totalCritical = zeroResumeCampaigns.length + highCPRCampaigns.length;
 
   // If no critical campaigns, don't send anything
-  if (criticalCampaigns.length === 0) {
+  if (totalCritical === 0) {
     console.log('[Slack] No critical campaigns - skipping alert');
     return true;
   }
@@ -660,49 +665,93 @@ export async function sendStatusUpdate(data: ScheduledReportData): Promise<boole
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${criticalCampaigns.length} campaign(s)* need attention — CPR exceeds *${formatINR(threshold)}* threshold.`,
+        text: `*${totalCritical} campaign(s)* need attention.`,
       },
     },
     { type: 'divider' },
   ];
 
-  // List critical campaigns
-  for (const c of criticalCampaigns.slice(0, 8)) {
-    const status = c.paidResumes === 0
-      ? `${formatINR(c.spend)} spent, *0 resumes* ❌`
-      : `*${formatINR(c.costPerResume)}*/resume (${c.paidResumes} resumes) ⚠️`;
-
+  // Section 1: Zero Resume Campaigns (most critical)
+  if (zeroResumeCampaigns.length > 0) {
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${c.company} - ${c.role}*\n${status}`,
+        text: `*❌ Zero Resumes (${zeroResumeCampaigns.length})*\nSpent ${formatINR(threshold)}+ but no resumes yet:`,
       },
     });
-  }
 
-  if (criticalCampaigns.length > 8) {
-    blocks.push({
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: `_...and ${criticalCampaigns.length - 8} more_` }],
-    });
-  }
-
-  blocks.push(
-    { type: 'divider' },
-    {
-      type: 'context',
-      elements: [
-        {
+    for (const c of zeroResumeCampaigns.slice(0, 5)) {
+      blocks.push({
+        type: 'section',
+        text: {
           type: 'mrkdwn',
-          text: `💡 Consider reducing bids or pausing these campaigns | _Prometheus_`,
+          text: `• *${c.company} - ${c.role}*: ${formatINR(c.spend)} spent`,
         },
-      ],
+      });
     }
-  );
+
+    if (zeroResumeCampaigns.length > 5) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_...and ${zeroResumeCampaigns.length - 5} more with zero resumes_` }],
+      });
+    }
+
+    blocks.push({ type: 'divider' });
+  }
+
+  // Section 2: High CPR Campaigns
+  if (highCPRCampaigns.length > 0) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*⚠️ High CPR (${highCPRCampaigns.length})*\nExceeding ${formatINR(threshold)}/resume:`,
+      },
+    });
+
+    for (const c of highCPRCampaigns.slice(0, 5)) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `• *${c.company} - ${c.role}*: ${formatINR(c.costPerResume)}/resume (${c.paidResumes} resumes)`,
+        },
+      });
+    }
+
+    if (highCPRCampaigns.length > 5) {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `_...and ${highCPRCampaigns.length - 5} more with high CPR_` }],
+      });
+    }
+
+    blocks.push({ type: 'divider' });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `💡 Consider reducing bids or pausing these campaigns | _Prometheus_`,
+      },
+    ],
+  });
+
+  // Build summary text
+  const summaryParts = [];
+  if (zeroResumeCampaigns.length > 0) {
+    summaryParts.push(`${zeroResumeCampaigns.length} with zero resumes`);
+  }
+  if (highCPRCampaigns.length > 0) {
+    summaryParts.push(`${highCPRCampaigns.length} with high CPR`);
+  }
 
   return sendSlackMessage({
-    text: `🚨 ${criticalCampaigns.length} campaign(s) exceed ${formatINR(threshold)}/resume - please review`,
+    text: `🚨 Campaign Alert: ${summaryParts.join(', ')} - please review`,
     blocks,
   });
 }
