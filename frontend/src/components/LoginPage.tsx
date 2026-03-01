@@ -96,10 +96,6 @@ export function LoginPage() {
           </form>
         </div>
 
-        {/* Footer */}
-        <p className="text-center text-gray-500 text-sm mt-6">
-          Powered by Mastra AI
-        </p>
       </div>
     </div>
   );
