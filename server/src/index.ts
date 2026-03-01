@@ -10,7 +10,33 @@ import { batchCampaignsTool } from './mastra/tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './mastra/tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './mastra/tools/mapAndReconcile.js';
 import { login, authMiddleware, type AuthRequest } from './lib/auth.js';
-import { checkAndAlertHighCosts, sendDailySummary, getAlertThreshold } from './lib/slack.js';
+import { checkAndAlertHighCosts, sendDailySummary, getAlertThreshold, checkDailyCosts, checkCampaignCosts } from './lib/slack.js';
+import { runCampaignCostMonitor, getMonitorStatus, ALERT_CONFIG } from './workflows/campaign-cost-monitor/index.js';
+import {
+  exportRules,
+  approveMapping,
+  rejectMapping,
+  updateMapping,
+  approveBatch,
+  getPendingMappings,
+  getApprovedMappings,
+  getRejectedMappings,
+  loadBatchingRules,
+} from './lib/batching-rules.js';
+import {
+  analyzeRejectedMapping,
+  applySuggestion,
+  type MappingCorrectionSuggestion,
+} from './mastra/tools/analyzeMappingCorrection.js';
+import {
+  getCachedAnalysis,
+  setCachedAnalysis,
+  invalidateCache,
+  clearAllCache,
+  getCacheStatus,
+  CACHE_CONFIG,
+} from './lib/analysis-cache.js';
+import cron from 'node-cron';
 
 dotenv.config();
 
@@ -281,28 +307,67 @@ app.get('/api/linkedin/account', async (req, res) => {
 
 // ============== Prometheus (Mastra) Agent Routes ==============
 
-// Full analysis pipeline
+// Full analysis pipeline with caching
 app.post('/api/prometheus/analyze', async (req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
   }
 
   try {
-    const { startDate, endDate, sendAlerts = true } = req.body;
+    const { startDate, endDate, sendAlerts = true, forceRefresh = false } = req.body;
 
-    const dateRange = startDate && endDate ? { start: startDate, end: endDate } : undefined;
+    // Default to today if no dates provided
+    const today = new Date().toISOString().split('T')[0];
+    const effectiveStart = startDate || today;
+    const effectiveEnd = endDate || today;
 
+    // Check cache first (unless force refresh requested)
+    if (!forceRefresh) {
+      const cached = getCachedAnalysis(effectiveStart, effectiveEnd);
+      if (cached) {
+        console.log(`[API] Returning cached analysis (fetched at ${cached.fetchedAtIST})`);
+
+        // Add cache metadata to response
+        const result = {
+          ...cached.data,
+          _cache: {
+            hit: true,
+            fetchedAt: cached.fetchedAt,
+            fetchedAtIST: cached.fetchedAtIST,
+            cacheKey: cached.cacheKey,
+          },
+        };
+
+        return res.json(result);
+      }
+    } else {
+      console.log('[API] Force refresh requested - bypassing cache');
+      invalidateCache(effectiveStart, effectiveEnd);
+    }
+
+    // Cache miss or force refresh - run full analysis
     console.log('[API] Running Prometheus analysis...');
     const result = await runPrometheusAnalysis({
       linkedInAccountId: LINKEDIN_AD_ACCOUNT_ID!,
       linkedInAccessToken: accessToken,
-      dateRange,
+      dateRange: { start: effectiveStart, end: effectiveEnd },
     });
+
+    // Store in cache
+    const cacheEntry = setCachedAnalysis(effectiveStart, effectiveEnd, result);
+
+    // Add cache metadata to response
+    (result as any)._cache = {
+      hit: false,
+      fetchedAt: cacheEntry.fetchedAt,
+      fetchedAtIST: cacheEntry.fetchedAtIST,
+      cacheKey: cacheEntry.cacheKey,
+    };
 
     // Check for high cost/resume and send Slack alerts (only for today's data)
     if (sendAlerts && result.report?.matchedCampaigns) {
-      const isToday = startDate === endDate && startDate === new Date().toISOString().split('T')[0];
-      if (isToday || !startDate) {
+      const isToday = effectiveStart === effectiveEnd && effectiveStart === today;
+      if (isToday) {
         const alertResult = await checkAndAlertHighCosts(result.report.matchedCampaigns);
         if (alertResult.alertsSent > 0) {
           console.log(`[Slack] Sent ${alertResult.alertsSent} cost alerts`);
@@ -320,6 +385,28 @@ app.post('/api/prometheus/analyze', async (req, res) => {
   } catch (error: any) {
     console.error('Prometheus analysis error:', error);
     res.status(500).json({ error: error.message || 'Analysis failed' });
+  }
+});
+
+// Cache status endpoint
+app.get('/api/prometheus/cache-status', (req, res) => {
+  const status = getCacheStatus();
+  res.json({
+    ...status,
+    config: CACHE_CONFIG,
+  });
+});
+
+// Force clear cache
+app.post('/api/prometheus/clear-cache', (req, res) => {
+  const { dateRange } = req.body;
+
+  if (dateRange?.start && dateRange?.end) {
+    const cleared = invalidateCache(dateRange.start, dateRange.end);
+    res.json({ success: true, cleared, message: `Cache cleared for ${dateRange.start} to ${dateRange.end}` });
+  } else {
+    const count = clearAllCache();
+    res.json({ success: true, cleared: count, message: `Cleared all ${count} cache entries` });
   }
 });
 
@@ -411,6 +498,85 @@ app.post('/api/prometheus/send-summary', async (req, res) => {
     }
   } catch (error: any) {
     console.error('Summary error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Daily cost/resume check - runs analysis for each day in range
+app.post('/api/prometheus/check-daily', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { startDate, endDate } = req.body;
+    const start = startDate ? new Date(startDate) : new Date();
+    const end = endDate ? new Date(endDate) : new Date();
+
+    console.log(`[DailyCheck] Checking daily costs from ${start.toISOString().split('T')[0]} to ${end.toISOString().split('T')[0]}`);
+
+    const dailyData: Array<{
+      date: string;
+      totalSpend: number;
+      paidResumes: number;
+      campaigns: Array<{ company: string; role: string; spend: number; resumes: number }>;
+    }> = [];
+
+    // Iterate through each day
+    const currentDate = new Date(start);
+    while (currentDate <= end) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      console.log(`[DailyCheck] Analyzing ${dateStr}...`);
+
+      try {
+        const result = await runPrometheusAnalysis({
+          linkedInAccountId: LINKEDIN_AD_ACCOUNT_ID!,
+          linkedInAccessToken: accessToken,
+          dateRange: { start: dateStr, end: dateStr },
+        });
+
+        if (result.report?.matchedCampaigns) {
+          const matched = result.report.matchedCampaigns;
+          const totalSpend = matched.reduce((sum: number, m: any) => sum + m.linkedin.totalSpend, 0);
+          const paidResumes = matched.reduce((sum: number, m: any) => sum + m.internal.resumes, 0);
+
+          dailyData.push({
+            date: dateStr,
+            totalSpend,
+            paidResumes,
+            campaigns: matched.map((m: any) => ({
+              company: m.linkedin.company,
+              role: m.linkedin.role,
+              spend: m.linkedin.totalSpend,
+              resumes: m.internal.resumes,
+            })),
+          });
+        }
+      } catch (dayError) {
+        console.error(`[DailyCheck] Error analyzing ${dateStr}:`, dayError);
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Check and send alerts
+    const alertResult = await checkDailyCosts(dailyData);
+
+    res.json({
+      success: true,
+      daysAnalyzed: dailyData.length,
+      daysExceeded: alertResult.daysExceeded,
+      alertsSent: alertResult.alertsSent,
+      threshold: getAlertThreshold(),
+      dailyData: dailyData.map(d => ({
+        date: d.date,
+        spend: d.totalSpend,
+        resumes: d.paidResumes,
+        costPerResume: d.paidResumes > 0 ? d.totalSpend / d.paidResumes : 0,
+      })),
+    });
+  } catch (error: any) {
+    console.error('Daily check error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -530,6 +696,7 @@ app.get('/api/health', (req, res) => {
     linkedInConnected: !!accessToken,
     adAccountId: LINKEDIN_AD_ACCOUNT_ID,
     mastraEnabled: true,
+    authDisabled: process.env.AUTH_DISABLED === 'true',
   });
 });
 
@@ -566,4 +733,247 @@ app.listen(PORT, () => {
     console.log(`   http://localhost:${PORT}/api/linkedin/auth-url`);
   }
   console.log('\n');
+});
+
+// ============== Cron Job: Intelligent Campaign Cost Monitor (Every 2 Hours) ==============
+
+async function runIntelligentCostMonitor() {
+  if (!accessToken) {
+    console.log('[Monitor] Skipping - LinkedIn not connected');
+    return;
+  }
+
+  if (!process.env.SLACK_WEBHOOK_URL) {
+    console.log('[Monitor] Skipping - Slack not configured');
+    return;
+  }
+
+  try {
+    const result = await runCampaignCostMonitor(
+      LINKEDIN_AD_ACCOUNT_ID!,
+      accessToken
+    );
+
+    if (result.success) {
+      if (result.alertsSent > 0) {
+        console.log(`[Monitor] ⚠️ Sent ${result.alertsSent} AI-analyzed alerts`);
+      } else if (result.breachedCampaigns > 0) {
+        console.log(`[Monitor] ${result.breachedCampaigns} breaches, ${result.alertsSkipped} skipped (dedup)`);
+      } else {
+        console.log(`[Monitor] ✅ All ${result.campaignsAnalyzed} campaigns within budget`);
+      }
+    } else {
+      console.error('[Monitor] Check failed:', result.error);
+    }
+  } catch (error) {
+    console.error('[Monitor] Error:', error);
+  }
+}
+
+// Schedule: Every 2 hours (at minute 0)
+// Cron expression: '0 */2 * * *' = At minute 0 of every 2nd hour
+cron.schedule('0 */2 * * *', () => {
+  const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+  console.log(`\n[Monitor] ⏰ Scheduled check triggered at ${time} IST`);
+  runIntelligentCostMonitor();
+}, {
+  timezone: 'Asia/Kolkata'
+});
+
+console.log(`⏰ Campaign Monitor: Checking every 2 hours (threshold: ₹${ALERT_CONFIG.cprThreshold}/resume)`);
+
+// Also run once on startup (after 30 seconds delay to let everything initialize)
+setTimeout(() => {
+  console.log('\n[Monitor] Running initial check...');
+  runIntelligentCostMonitor();
+}, 30000);
+
+// ============== Monitor Status Endpoint ==============
+
+app.get('/api/prometheus/monitor-status', (req, res) => {
+  const status = getMonitorStatus();
+  res.json({
+    ...status,
+    nextScheduledRun: 'Every 2 hours at :00',
+    linkedInConnected: !!accessToken,
+    slackConfigured: !!process.env.SLACK_WEBHOOK_URL,
+  });
+});
+
+// Manual trigger for the intelligent monitor
+app.post('/api/prometheus/run-monitor', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'LinkedIn not connected' });
+  }
+
+  try {
+    const result = await runCampaignCostMonitor(
+      LINKEDIN_AD_ACCOUNT_ID!,
+      accessToken
+    );
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============== Mapping Approval Endpoints ==============
+
+// Get all mappings with their approval status
+app.get('/api/prometheus/mappings', (req, res) => {
+  const rules = exportRules();
+  const mappings = Object.entries(rules.manualMappings).map(([campaignName, mapping]) => ({
+    campaignName,
+    ...mapping,
+  }));
+
+  res.json({
+    total: mappings.length,
+    approved: mappings.filter(m => m.approved).length,
+    pending: mappings.filter(m => !m.approved && !m.rejected).length,
+    rejected: mappings.filter(m => m.rejected).length,
+    mappings,
+    lastUpdated: rules.lastUpdated,
+  });
+});
+
+// Get pending mappings (need approval)
+app.get('/api/prometheus/mappings/pending', (req, res) => {
+  const pending = getPendingMappings();
+  res.json({ count: pending.length, mappings: pending });
+});
+
+// Get approved mappings (locked)
+app.get('/api/prometheus/mappings/approved', (req, res) => {
+  const approved = getApprovedMappings();
+  res.json({ count: approved.length, mappings: approved });
+});
+
+// Get rejected mappings
+app.get('/api/prometheus/mappings/rejected', (req, res) => {
+  const rejected = getRejectedMappings();
+  res.json({ count: rejected.length, mappings: rejected });
+});
+
+// Approve a single mapping (locks it forever)
+app.post('/api/prometheus/mappings/approve', (req, res) => {
+  const { campaignName } = req.body;
+
+  if (!campaignName) {
+    return res.status(400).json({ error: 'campaignName is required' });
+  }
+
+  const success = approveMapping(campaignName);
+
+  if (success) {
+    res.json({ success: true, message: `Mapping approved and locked: ${campaignName}` });
+  } else {
+    res.status(400).json({ error: 'Failed to approve mapping - not found' });
+  }
+});
+
+// Approve all mappings in a batch (by batchId)
+app.post('/api/prometheus/mappings/approve-batch', (req, res) => {
+  const { batchId } = req.body;
+
+  if (!batchId) {
+    return res.status(400).json({ error: 'batchId is required' });
+  }
+
+  const count = approveBatch(batchId);
+  res.json({ success: true, approvedCount: count, message: `Approved ${count} mappings for batch: ${batchId}` });
+});
+
+// Reject a mapping with AI analysis for correction suggestions
+app.post('/api/prometheus/mappings/reject', async (req, res) => {
+  const { campaignName, reason } = req.body;
+
+  if (!campaignName) {
+    return res.status(400).json({ error: 'campaignName is required' });
+  }
+
+  if (!reason) {
+    return res.status(400).json({ error: 'reason is required for rejection' });
+  }
+
+  // First, mark the mapping as rejected
+  const success = rejectMapping(campaignName, reason);
+
+  if (!success) {
+    return res.status(400).json({ error: 'Failed to reject mapping - not found or already approved' });
+  }
+
+  // Now run AI analysis to generate correction suggestions
+  console.log('[API] Running AI analysis for rejected mapping:', campaignName);
+
+  try {
+    const rules = loadBatchingRules();
+    const mapping = rules.manualMappings[campaignName];
+
+    if (!mapping) {
+      return res.json({
+        success: true,
+        message: `Mapping rejected: ${campaignName}`,
+        suggestions: [],
+      });
+    }
+
+    const suggestions = await analyzeRejectedMapping(
+      campaignName,
+      mapping,
+      reason,
+      rules.manualMappings
+    );
+
+    res.json({
+      success: true,
+      message: `Mapping rejected: ${campaignName}. AI generated ${suggestions.length} correction suggestions.`,
+      suggestions,
+    });
+  } catch (error: any) {
+    console.error('[API] AI analysis error:', error);
+    res.json({
+      success: true,
+      message: `Mapping rejected: ${campaignName}. AI analysis failed.`,
+      suggestions: [],
+      error: error.message,
+    });
+  }
+});
+
+// Update a mapping (manually correct it)
+app.post('/api/prometheus/mappings/update', (req, res) => {
+  const { campaignName, company, role, batchId } = req.body;
+
+  if (!campaignName || !company || !role) {
+    return res.status(400).json({ error: 'campaignName, company, and role are required' });
+  }
+
+  const success = updateMapping(campaignName, company, role, batchId);
+
+  if (success) {
+    res.json({ success: true, message: `Mapping updated: ${campaignName} → ${company} | ${role}` });
+  } else {
+    res.status(400).json({ error: 'Failed to update mapping - already approved (locked)' });
+  }
+});
+
+// Apply an AI suggestion to fix a rejected mapping
+app.post('/api/prometheus/mappings/apply-suggestion', (req, res) => {
+  const { suggestion } = req.body as { suggestion: MappingCorrectionSuggestion };
+
+  if (!suggestion || !suggestion.campaignName || !suggestion.action) {
+    return res.status(400).json({ error: 'Valid suggestion object is required' });
+  }
+
+  const success = applySuggestion(suggestion);
+
+  if (success) {
+    res.json({
+      success: true,
+      message: `Applied ${suggestion.action}: ${suggestion.campaignName} → ${suggestion.suggestedCompany || suggestion.currentCompany} | ${suggestion.suggestedRole || suggestion.currentRole}`,
+    });
+  } else {
+    res.status(400).json({ error: 'Failed to apply suggestion' });
+  }
 });

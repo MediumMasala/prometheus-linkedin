@@ -20,9 +20,9 @@ function getSlackWebhookUrl(): string | null {
   return process.env.SLACK_WEBHOOK_URL || null;
 }
 
-// Get alert threshold from environment (default ₹500)
+// Get alert threshold from environment (default ₹350)
 export function getAlertThreshold(): number {
-  return parseInt(process.env.COST_ALERT_THRESHOLD || '500', 10);
+  return parseInt(process.env.COST_ALERT_THRESHOLD || '350', 10);
 }
 
 // Send a message to Slack
@@ -168,6 +168,260 @@ export async function checkAndAlertHighCosts(
   }
 
   return { alertsSent: 0, alertsTriggered: [] };
+}
+
+// Campaign-level alert for cron job
+interface CampaignAlert {
+  company: string;
+  role: string;
+  campaignName: string;
+  spend: number;
+  resumes: number;
+  costPerResume: number;
+  excessAmount: number; // How much over threshold
+}
+
+// Send campaign-level alert with friendly message
+export async function sendCampaignAlert(alerts: CampaignAlert[]): Promise<boolean> {
+  if (alerts.length === 0) return true;
+
+  const threshold = getAlertThreshold();
+  const time = new Date().toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `⚠️ Campaign Cost Alert`,
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `Hey team! 👋\n\nJust checked our LinkedIn campaigns and found *${alerts.length} campaign(s)* spending more than *${formatINR(threshold)}/resume*. Please look into it once.`,
+      },
+    },
+    { type: 'divider' },
+  ];
+
+  // Add each campaign alert
+  for (const alert of alerts.slice(0, 8)) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${alert.company} - ${alert.role}*\n` +
+          `This campaign has spent *${formatINR(alert.costPerResume)}/resume* — that's *${formatINR(alert.excessAmount)} more* than our ${formatINR(threshold)} target.\n` +
+          `📊 Spend: ${formatINR(alert.spend)} | Resumes: ${alert.resumes}`,
+      },
+    });
+  }
+
+  if (alerts.length > 8) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `_...and ${alerts.length - 8} more campaigns need attention_`,
+      },
+    });
+  }
+
+  blocks.push(
+    { type: 'divider' },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `💡 *Suggestion:* Consider reducing bids or pausing these campaigns to improve ROI.\n_Checked at ${time} IST by Prometheus_`,
+        },
+      ],
+    }
+  );
+
+  return sendSlackMessage({
+    text: `⚠️ ${alerts.length} campaign(s) exceeding ${formatINR(threshold)}/resume - please look into it`,
+    blocks,
+  });
+}
+
+// Check individual campaigns and send alerts (for cron job)
+export async function checkCampaignCosts(
+  campaigns: Array<{
+    company: string;
+    role: string;
+    campaignName: string;
+    spend: number;
+    resumes: number;
+  }>
+): Promise<{ alertsSent: number; campaignsExceeded: number; alerts: CampaignAlert[] }> {
+  const threshold = getAlertThreshold();
+
+  const alerts: CampaignAlert[] = campaigns
+    .filter((c) => c.resumes > 0 && (c.spend / c.resumes) > threshold)
+    .map((c) => {
+      const costPerResume = c.spend / c.resumes;
+      return {
+        company: c.company,
+        role: c.role,
+        campaignName: c.campaignName,
+        spend: c.spend,
+        resumes: c.resumes,
+        costPerResume,
+        excessAmount: costPerResume - threshold,
+      };
+    })
+    .sort((a, b) => b.costPerResume - a.costPerResume); // Worst first
+
+  if (alerts.length > 0) {
+    const sent = await sendCampaignAlert(alerts);
+    return { alertsSent: sent ? alerts.length : 0, campaignsExceeded: alerts.length, alerts };
+  }
+
+  return { alertsSent: 0, campaignsExceeded: 0, alerts: [] };
+}
+
+// Daily alert data structure
+interface DailyAlert {
+  date: string;
+  totalSpend: number;
+  totalResumes: number;
+  costPerResume: number;
+  paidResumes: number;
+  campaigns: Array<{ company: string; role: string; spend: number; resumes: number; costPerResume: number }>;
+}
+
+// Send daily cost per resume alert
+export async function sendDailyCostAlert(alerts: DailyAlert[]): Promise<boolean> {
+  if (alerts.length === 0) return true;
+
+  const threshold = getAlertThreshold();
+
+  const blocks: any[] = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `🚨 Daily Cost/Resume Alert`,
+        emoji: true,
+      },
+    },
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*${alerts.length} day(s)* exceeded the cost threshold of *${formatINR(threshold)}* per resume.`,
+      },
+    },
+    { type: 'divider' },
+  ];
+
+  // Add each day's alert
+  for (const alert of alerts.slice(0, 5)) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*📅 ${alert.date}*\n` +
+          `• Cost/Resume: *${formatINR(alert.costPerResume)}* ❌\n` +
+          `• Total Spend: ${formatINR(alert.totalSpend)}\n` +
+          `• Paid Resumes: ${alert.paidResumes}`,
+      },
+    });
+
+    // Show top 3 worst performers for this day
+    if (alert.campaigns.length > 0) {
+      const worstCampaigns = alert.campaigns
+        .filter(c => c.resumes > 0)
+        .sort((a, b) => b.costPerResume - a.costPerResume)
+        .slice(0, 3);
+
+      if (worstCampaigns.length > 0) {
+        blocks.push({
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `_Worst performers:_ ` + worstCampaigns
+                .map(c => `${c.company} ${c.role} (${formatINR(c.costPerResume)})`)
+                .join(' · '),
+            },
+          ],
+        });
+      }
+    }
+
+    blocks.push({ type: 'divider' });
+  }
+
+  if (alerts.length > 5) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `_...and ${alerts.length - 5} more days_`,
+      },
+    });
+  }
+
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `💡 *Action:* Review campaign bids and targeting for these days. | _Prometheus Analyzer_`,
+      },
+    ],
+  });
+
+  return sendSlackMessage({
+    text: `🚨 ${alerts.length} day(s) exceeded ${formatINR(threshold)}/resume threshold`,
+    blocks,
+  });
+}
+
+// Check daily data and send alerts
+export async function checkDailyCosts(
+  dailyData: Array<{
+    date: string;
+    totalSpend: number;
+    paidResumes: number;
+    campaigns: Array<{ company: string; role: string; spend: number; resumes: number }>;
+  }>
+): Promise<{ alertsSent: number; daysExceeded: number }> {
+  const threshold = getAlertThreshold();
+
+  const alertDays: DailyAlert[] = dailyData
+    .map((day) => {
+      const costPerResume = day.paidResumes > 0 ? day.totalSpend / day.paidResumes : 0;
+      return {
+        date: day.date,
+        totalSpend: day.totalSpend,
+        totalResumes: day.paidResumes,
+        costPerResume,
+        paidResumes: day.paidResumes,
+        campaigns: day.campaigns.map(c => ({
+          ...c,
+          costPerResume: c.resumes > 0 ? c.spend / c.resumes : 0,
+        })),
+      };
+    })
+    .filter((day) => day.costPerResume > threshold && day.paidResumes > 0);
+
+  if (alertDays.length > 0) {
+    const sent = await sendDailyCostAlert(alertDays);
+    return { alertsSent: sent ? alertDays.length : 0, daysExceeded: alertDays.length };
+  }
+
+  return { alertsSent: 0, daysExceeded: 0 };
 }
 
 // Send daily summary to Slack

@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "lastUpdated": "2026-03-01T08:05:55.564Z",
+  "rules": [],
+  "manualMappings": {
+    "AFB - Performace Marketing": {
+      "company": "AppsForBharat",
+      "role": "Performance Marketing Manager - South",
+      "batchId": "appsforbharat-performance-marketing-manager-south",
+      "approved": true,
+      "approvedAt": "2026-03-01T06:46:29.118Z",
+      "rejected": false
+    },
+    "AFB - Performace Marketing - Agency TG": {
+      "company": "AppsForBharat",
+      "role": "Performance Marketing Manager - South",
+      "batchId": "appsforbharat-performance-marketing-manager-south",
+      "approved": true,
+      "approvedAt": "2026-03-01T06:46:29.118Z",
+      "rejected": false
+    },
+    "Sarvam - AI Backend - Company TG": {
+      "company": "Sarvam",
+      "role": "Backend AI Engineer",
+      "batchId": "sarvam-backend-ai-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - Stealth- VP Engineering": {
+      "company": "Stealth",
+      "role": "VP/SVP Engineering",
+      "batchId": "stealth-vp/svp-engineering",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Sarvam - ML Eng - pedigree": {
+      "company": "Sarvam",
+      "role": "Machine Learning Engineer",
+      "batchId": "sarvam-machine-learning-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Sarvam - AI Backend - Pedigree": {
+      "company": "Sarvam",
+      "role": "Backend AI Engineer",
+      "batchId": "sarvam-backend-ai-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Waterlabs AI - AI Engineer": {
+      "company": "Waterlabs AI",
+      "role": "AI Engineer",
+      "batchId": "waterlabs-ai-ai-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - Stealth- VP Engineering- pedigree": {
+      "company": "Stealth",
+      "role": "VP/SVP Engineering",
+      "batchId": "stealth-vp/svp-engineering",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Sarvam - ML Eng - Company TG": {
+      "company": "Sarvam",
+      "role": "Machine Learning Engineer",
+      "batchId": "sarvam-machine-learning-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - Stealth- Head of DS - Company": {
+      "company": "Stealth",
+      "role": "Head of Data Science",
+      "batchId": "stealth-head-of-data-science",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Seekho Android Development SDE - 2": {
+      "company": "Seekho",
+      "role": "Android Development SDE - 2",
+      "batchId": "seekho-android-development-sde---2",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - stealth - Business head - Pedigree": {
+      "company": "Stealth",
+      "role": "Business Head",
+      "batchId": "stealth-business-head",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - stealth - Business head - Company TG": {
+      "company": "Stealth",
+      "role": "Business Head",
+      "batchId": "stealth-business-head",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Waterlabs AI - AI Product Manager": {
+      "company": "Waterlabs AI",
+      "role": "AI Product Manager",
+      "batchId": "waterlabs-ai-ai-product-manager",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Waterlabs AI - AI Engineer- Pedigree": {
+      "company": "Waterlabs AI",
+      "role": "AI Engineer",
+      "batchId": "waterlabs-ai-ai-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Shaadi - Stealth- Head of DS - Pedigree JT": {
+      "company": "Stealth",
+      "role": "Head of Data Science",
+      "batchId": "stealth-head-of-data-science",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "kAIgentic - SM - MLOps": {
+      "company": "kAIgentic",
+      "role": "SM - MLOps",
+      "batchId": "kaigentic-sm---mlops",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:32:05.586Z"
+    },
+    "Zilo - SM - Company TG": {
+      "company": "Zilo",
+      "role": "SM",
+      "batchId": "zilo-sm",
+      "source": "ai",
+      "createdAt": "2026-03-01T07:55:38.999Z"
+    }
+  }
+}

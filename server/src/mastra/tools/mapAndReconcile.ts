@@ -26,15 +26,27 @@ async function callOpenAIForMatching(
 
 Your task is to match campaign batches (LinkedIn ads) to internal roles (job openings with resume counts).
 
+COMPANY ALIASES (these are the SAME company - match them!):
+- AFB = AppsForBharat = Apps For Bharat = AppsforbBharat
+- FamPay = Fampay = FAMPAY
+- Waterlabs AI = WaterlabsAI = Waterlabs
+- kAIgentic = Kaigentic = KAIgentic
+- Zilo = ZILO
+- Zoop = ZOOP
+- Seekho = SEEKHO
+- Stealth = stealth (case insensitive)
+
 MATCHING RULES:
-1. Company name MUST match (Sarvam → Sarvam, FamPay → FamPay)
-2. Role/title should be similar (ML Engineer ≈ Machine Learning Engineer, Backend AI ≈ AI Backend)
+1. Company names match if they are aliases of each other
+   - Batch "AFB" matches Internal "AppsForBharat" ✓
+   - Batch "FamPay" matches Internal "Fampay" ✓
+2. Role/title should be similar (ML Engineer ≈ Machine Learning Engineer, Backend AI ≈ AI Backend, Tech Lead ≈ Technical Lead)
 3. One batch can only match ONE role
 4. One role can only match ONE batch (pick the best if multiple could match)
 5. If no good match exists, don't include it
 
 CONFIDENCE LEVELS:
-- "high": Company AND role match clearly (exact or very similar)
+- "high": Company matches (including aliases) AND role matches clearly
 - "medium": Company matches, role is approximate
 - "low": Partial match, uncertain
 

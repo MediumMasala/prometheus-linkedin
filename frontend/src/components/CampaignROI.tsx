@@ -1,6 +1,48 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { JobApplication } from '../types';
 import { authFetch } from '../contexts/AuthContext';
+
+// Mapping info type (from backend)
+interface MappingInfo {
+  campaignName: string;
+  company: string;
+  role: string;
+  batchId: string;
+  approved?: boolean;
+  approvedAt?: string;
+  rejected?: boolean;
+  rejectionReason?: string;
+  rejectedAt?: string;
+  source?: 'ai' | 'manual';
+  createdAt?: string;
+}
+
+interface MappingsResponse {
+  total: number;
+  approved: number;
+  pending: number;
+  rejected: number;
+  mappings: MappingInfo[];
+  lastUpdated: string;
+}
+
+interface MappingCorrectionSuggestion {
+  action: 'reassign' | 'bifurcate' | 'remove' | 'merge';
+  campaignName: string;
+  currentCompany: string;
+  currentRole: string;
+  suggestedCompany?: string;
+  suggestedRole?: string;
+  suggestedBatchId?: string;
+  reason: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+interface RejectResponse {
+  success: boolean;
+  message: string;
+  suggestions: MappingCorrectionSuggestion[];
+}
 
 // Types from Prometheus API
 interface CampaignVariant {
@@ -44,6 +86,13 @@ interface InternalRole {
   source?: string;
 }
 
+interface CacheInfo {
+  hit: boolean;
+  fetchedAt: string;
+  fetchedAtIST: string;
+  cacheKey: string;
+}
+
 interface PrometheusResponse {
   linkedIn: {
     campaigns: any[];
@@ -60,6 +109,7 @@ interface PrometheusResponse {
     totalBatches: number;
   };
   report: string;
+  _cache?: CacheInfo;
 }
 
 function formatCurrency(value: number): string {
@@ -135,12 +185,145 @@ export function CampaignROI(_props: CampaignROIProps) {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showOrganicSection, setShowOrganicSection] = useState<boolean>(true);
 
+  // Mapping approval state
+  const [mappings, setMappings] = useState<MappingsResponse | null>(null);
+  const [showMappingPanel, setShowMappingPanel] = useState(false);
+  const [rejectingMapping, setRejectingMapping] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [mappingActionLoading, setMappingActionLoading] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<MappingCorrectionSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   // Initialize dates on mount - default to Today
   useEffect(() => {
     const today = new Date();
     setStartDate(getDateString(today));
     setEndDate(getDateString(today));
   }, []);
+
+  // Fetch mappings on mount
+  const fetchMappings = useCallback(async () => {
+    try {
+      const response = await authFetch('/api/prometheus/mappings');
+      if (response.ok) {
+        const data: MappingsResponse = await response.json();
+        setMappings(data);
+      }
+    } catch (err) {
+      console.error('Error fetching mappings:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMappings();
+  }, [fetchMappings]);
+
+  // Show feedback toast
+  const showFeedback = (type: 'success' | 'error', message: string) => {
+    setActionFeedback({ type, message });
+    setTimeout(() => setActionFeedback(null), 4000);
+  };
+
+  // Approve a batch
+  const handleApproveBatch = async (batchId: string, batchName: string) => {
+    setMappingActionLoading(batchId);
+    try {
+      const response = await authFetch('/api/prometheus/mappings/approve-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        await fetchMappings();
+        showFeedback('success', `Approved & locked: ${batchName} (${data.approvedCount} campaigns)`);
+      }
+    } catch (err) {
+      console.error('Error approving batch:', err);
+      showFeedback('error', 'Failed to approve batch');
+    } finally {
+      setMappingActionLoading(null);
+    }
+  };
+
+  // Reject a single mapping with AI analysis
+  const handleRejectMapping = async (campaignName: string, reason: string) => {
+    setMappingActionLoading(campaignName);
+    try {
+      const response = await authFetch('/api/prometheus/mappings/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignName, reason }),
+      });
+
+      if (response.ok) {
+        const data: RejectResponse = await response.json();
+        await fetchMappings();
+        setRejectingMapping(null);
+        setRejectionReason('');
+
+        // Show AI suggestions if any
+        if (data.suggestions && data.suggestions.length > 0) {
+          setSuggestions(data.suggestions);
+          setShowSuggestions(true);
+          showFeedback('success', `Rejected. AI generated ${data.suggestions.length} correction suggestion(s).`);
+        } else {
+          showFeedback('success', `Rejected: ${campaignName}`);
+        }
+      }
+    } catch (err) {
+      console.error('Error rejecting mapping:', err);
+      showFeedback('error', 'Failed to reject mapping');
+    } finally {
+      setMappingActionLoading(null);
+    }
+  };
+
+  // Apply an AI suggestion
+  const handleApplySuggestion = async (suggestion: MappingCorrectionSuggestion) => {
+    setMappingActionLoading(suggestion.campaignName);
+    try {
+      const response = await authFetch('/api/prometheus/mappings/apply-suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestion }),
+      });
+
+      if (response.ok) {
+        await fetchMappings();
+        // Remove applied suggestion from list
+        setSuggestions(prev => prev.filter(s => s.campaignName !== suggestion.campaignName));
+        showFeedback('success', `Applied: ${suggestion.action} - ${suggestion.suggestedCompany || suggestion.currentCompany} | ${suggestion.suggestedRole || suggestion.currentRole}`);
+
+        // Hide panel if no more suggestions
+        if (suggestions.length <= 1) {
+          setShowSuggestions(false);
+        }
+      }
+    } catch (err) {
+      console.error('Error applying suggestion:', err);
+      showFeedback('error', 'Failed to apply suggestion');
+    } finally {
+      setMappingActionLoading(null);
+    }
+  };
+
+  // Get mapping status for a batch
+  const getBatchMappingStatus = (batchId: string): 'approved' | 'pending' | 'mixed' | 'unknown' => {
+    if (!mappings) return 'unknown';
+
+    const batchMappings = mappings.mappings.filter(m => m.batchId === batchId);
+    if (batchMappings.length === 0) return 'unknown';
+
+    const allApproved = batchMappings.every(m => m.approved);
+    const someApproved = batchMappings.some(m => m.approved);
+
+    if (allApproved) return 'approved';
+    if (someApproved) return 'mixed';
+    return 'pending';
+  };
 
   const toggleBatchExpand = (batchId: string) => {
     setExpandedBatches((prev) => {
@@ -196,13 +379,21 @@ export function CampaignROI(_props: CampaignROIProps) {
     }
   }, [startDate, endDate]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Only send dates if both are set, otherwise let backend use defaults
-      const body = startDate && endDate ? { startDate, endDate } : {};
+      // Build request body with optional force refresh
+      const body: any = {};
+      if (startDate && endDate) {
+        body.startDate = startDate;
+        body.endDate = endDate;
+      }
+      if (forceRefresh) {
+        body.forceRefresh = true;
+      }
+
       const response = await authFetch('/api/prometheus/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,6 +406,15 @@ export function CampaignROI(_props: CampaignROIProps) {
 
       const result: PrometheusResponse = await response.json();
       setData(result);
+
+      // Show feedback about cache status
+      if (result._cache) {
+        if (result._cache.hit) {
+          showFeedback('success', `Using cached data from ${result._cache.fetchedAtIST}`);
+        } else {
+          showFeedback('success', `Fresh data fetched at ${result._cache.fetchedAtIST}`);
+        }
+      }
     } catch (err) {
       console.error('Error loading Prometheus data:', err);
       setError('Failed to load campaign analysis data');
@@ -283,40 +483,129 @@ export function CampaignROI(_props: CampaignROIProps) {
 
   const { batches, internal } = data;
 
-  // Match batches with internal roles to get resume counts
-  const matchBatchToRole = (batch: CampaignBatch): InternalRole | null => {
-    // Try exact match first (company + role)
-    const exactMatch = internal.roles.find(
-      (r) => r.companyName.toLowerCase() === batch.company.toLowerCase() &&
-             (r.jobTitle.toLowerCase().includes(batch.role.toLowerCase()) ||
-              batch.role.toLowerCase().includes(r.jobTitle.toLowerCase()) ||
-              r.jobTitle.toLowerCase() === batch.role.toLowerCase())
-    );
-    if (exactMatch) return exactMatch;
-
-    // Try company match with similar role
-    const companyMatches = internal.roles.filter(
-      (r) => r.companyName.toLowerCase() === batch.company.toLowerCase()
-    );
-    if (companyMatches.length > 0) {
-      // Find best role match
-      const roleWords = batch.role.toLowerCase().split(/\s+/);
-      let bestMatch: InternalRole | null = null;
-      let bestScore = 0;
-      for (const role of companyMatches) {
-        const titleWords = role.jobTitle.toLowerCase().split(/\s+/);
-        const matchingWords = roleWords.filter(w => titleWords.some(tw => tw.includes(w) || w.includes(tw)));
-        if (matchingWords.length > bestScore) {
-          bestScore = matchingWords.length;
-          bestMatch = role;
-        }
-      }
-      if (bestMatch && bestScore >= 1) return bestMatch;
-    }
-    return null;
+  // Company aliases - same company with different names
+  const COMPANY_ALIASES: Record<string, string[]> = {
+    'appsforbharat': ['afb', 'apps for bharat', 'appsforbharat'],
+    'fampay': ['fampay', 'fam pay'],
+    'waterlabs ai': ['waterlabs ai', 'waterlabsai', 'waterlabs'],
+    'kaigentic': ['kaigentic', 'kaigentic'],
+    'stealth': ['stealth'],
+    'sarvam': ['sarvam'],
+    'seekho': ['seekho'],
+    'zilo': ['zilo'],
+    'zoop': ['zoop'],
   };
 
-  // Enrich batches with resume data
+  // Normalize role name by stripping company prefix for consistent display
+  const normalizeRoleForDisplay = (jobTitle: string, companyName: string): string => {
+    if (!jobTitle || !companyName) return jobTitle;
+
+    let normalized = jobTitle.trim();
+    const companyLower = companyName.toLowerCase().trim();
+    const titleLower = normalized.toLowerCase();
+
+    // Check if title starts with company name followed by space or dash
+    if (titleLower.startsWith(companyLower + ' ') || titleLower.startsWith(companyLower + '-')) {
+      normalized = normalized.slice(companyName.length).trim();
+      normalized = normalized.replace(/^[-–—:|\s]+/, '').trim();
+    }
+
+    return normalized || jobTitle;
+  };
+
+  // Check if two company names match (including aliases)
+  const companiesMatch = (company1: string, company2: string): boolean => {
+    const c1 = company1.toLowerCase().trim();
+    const c2 = company2.toLowerCase().trim();
+    if (c1 === c2) return true;
+
+    // Check if they share an alias group
+    for (const [canonical, aliases] of Object.entries(COMPANY_ALIASES)) {
+      const allNames = [canonical, ...aliases];
+      if (allNames.includes(c1) && allNames.includes(c2)) return true;
+      if (allNames.some(a => c1.includes(a) || a.includes(c1)) &&
+          allNames.some(a => c2.includes(a) || a.includes(c2))) return true;
+    }
+    return false;
+  };
+
+  // Match batches with internal roles to get resume counts
+  // Rule: One batch maps to exactly ONE internal role
+  const matchBatchToRole = (batch: CampaignBatch): InternalRole | null => {
+    const batchCompany = batch.company.toLowerCase().trim();
+    const batchRole = batch.role.toLowerCase().trim();
+
+    // Get all roles from this company (using alias matching)
+    const companyRoles = internal.roles.filter(
+      (r) => companiesMatch(r.companyName, batch.company)
+    );
+
+    if (companyRoles.length === 0) return null;
+
+    // Helper: normalize role name by removing company prefix
+    const normalizeRole = (jobTitle: string, company: string): string => {
+      let normalized = jobTitle.toLowerCase().trim();
+      // Remove company name prefix if present (e.g., "Waterlabs AI AI Product Manager" -> "AI Product Manager")
+      const companyLower = company.toLowerCase().trim();
+      if (normalized.startsWith(companyLower)) {
+        normalized = normalized.slice(companyLower.length).trim();
+      }
+      // Also try removing with dash/hyphen variations
+      const companyVariants = [companyLower, companyLower.replace(/\s+/g, '-'), companyLower.replace(/\s+/g, '')];
+      for (const variant of companyVariants) {
+        if (normalized.startsWith(variant)) {
+          normalized = normalized.slice(variant.length).trim();
+          break;
+        }
+      }
+      return normalized;
+    };
+
+    const normalizedBatchRole = normalizeRole(batchRole, batchCompany);
+
+    // Score each role for match quality
+    let bestMatch: InternalRole | null = null;
+    let bestScore = 0;
+
+    for (const role of companyRoles) {
+      const normalizedTitle = normalizeRole(role.jobTitle, role.companyName);
+      let score = 0;
+
+      // Exact match after normalization (highest priority)
+      if (normalizedTitle === normalizedBatchRole) {
+        score = 100;
+      }
+      // One contains the other
+      else if (normalizedTitle.includes(normalizedBatchRole) || normalizedBatchRole.includes(normalizedTitle)) {
+        score = 80;
+      }
+      // Word-level matching
+      else {
+        const batchWords = normalizedBatchRole.split(/\s+/).filter(w => w.length > 2);
+        const titleWords = normalizedTitle.split(/\s+/).filter(w => w.length > 2);
+
+        // Count matching words (exact or partial)
+        const matchingWords = batchWords.filter(bw =>
+          titleWords.some(tw => tw.includes(bw) || bw.includes(tw))
+        );
+
+        // Score based on percentage of batch words matched
+        if (batchWords.length > 0) {
+          score = (matchingWords.length / batchWords.length) * 60;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = role;
+      }
+    }
+
+    // Only return match if score is high enough (at least 50% word match)
+    return bestScore >= 30 ? bestMatch : null;
+  };
+
+  // Enrich batches with resume data (ONE batch = ONE role, no double counting)
   const enrichedBatches = batches.batches.map((batch) => {
     const matchedRole = matchBatchToRole(batch);
     const resumes = matchedRole?.resumes || 0;
@@ -325,6 +614,7 @@ export function CampaignROI(_props: CampaignROIProps) {
       ...batch,
       matchedResumes: resumes,
       costPerResume: cpr,
+      matchedRole, // Single matched role (no double counting)
     };
   });
 
@@ -429,12 +719,22 @@ export function CampaignROI(_props: CampaignROIProps) {
   const avgCPC = totalClicks > 0 ? totalSpend / totalClicks : 0;
   const costPerResume = totalResumes > 0 ? totalSpend / totalResumes : 0;
 
+  // Calculate spend from ACTIVE campaigns only
+  const activeSpend = batches.batches.reduce((sum, b) => {
+    const activeCampaignSpend = b.campaigns
+      .filter(c => c.status === 'ACTIVE')
+      .reduce((s, c) => s + c.metrics.spend, 0);
+    return sum + activeCampaignSpend;
+  }, 0) + batches.ungrouped
+    .filter((c: any) => c.status === 'ACTIVE')
+    .reduce((sum: number, c: any) => sum + (c.spend || 0), 0);
+
   // Calculate organic roles - internal roles NOT matched to any LinkedIn campaign
+  // Using the already-computed matchedRole from enrichedBatches (one batch = one role)
   const matchedRoleKeys = new Set<string>();
   sortedBatches.forEach((batch) => {
-    const matchedRole = matchBatchToRole(batch);
-    if (matchedRole) {
-      matchedRoleKeys.add(`${matchedRole.companyName}|${matchedRole.jobTitle}`);
+    if (batch.matchedRole) {
+      matchedRoleKeys.add(`${batch.matchedRole.companyName}|${batch.matchedRole.jobTitle}`);
     }
   });
 
@@ -444,26 +744,172 @@ export function CampaignROI(_props: CampaignROIProps) {
   const organicResumes = organicRoles.reduce((sum, r) => sum + r.resumes, 0);
   const paidResumes = totalResumes - organicResumes;
 
+  // Cost per Paid Resume = Active campaign spend / Paid resumes only
+  const costPerPaidResume = paidResumes > 0 ? activeSpend / paidResumes : 0;
+
   return (
     <div className="space-y-6">
+      {/* Feedback Toast */}
+      {actionFeedback && (
+        <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg transition-all ${
+          actionFeedback.type === 'success'
+            ? 'bg-green-600 text-white'
+            : 'bg-red-600 text-white'
+        }`}>
+          <div className="flex items-center gap-2">
+            {actionFeedback.type === 'success' ? (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            <span className="font-medium">{actionFeedback.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* AI Suggestions Panel */}
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-100 rounded-lg">
+                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">AI Correction Suggestions</h3>
+                    <p className="text-sm text-gray-600">Based on your rejection, here's what the AI suggests</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSuggestions(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto max-h-[50vh]">
+              {suggestions.map((suggestion, idx) => (
+                <div key={idx} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          suggestion.action === 'bifurcate' ? 'bg-blue-100 text-blue-700' :
+                          suggestion.action === 'reassign' ? 'bg-green-100 text-green-700' :
+                          suggestion.action === 'remove' ? 'bg-red-100 text-red-700' :
+                          'bg-amber-100 text-amber-700'
+                        }`}>
+                          {suggestion.action.toUpperCase()}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          suggestion.confidence === 'high' ? 'bg-green-50 text-green-600' :
+                          suggestion.confidence === 'medium' ? 'bg-amber-50 text-amber-600' :
+                          'bg-red-50 text-red-600'
+                        }`}>
+                          {suggestion.confidence} confidence
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-900 mb-1">{suggestion.campaignName}</p>
+                      <p className="text-sm text-gray-600 mb-2">
+                        <span className="text-gray-400">Current:</span> {suggestion.currentCompany} | {suggestion.currentRole}
+                      </p>
+                      {(suggestion.suggestedCompany || suggestion.suggestedRole) && (
+                        <p className="text-sm text-green-700 font-medium mb-2">
+                          <span className="text-gray-400">Suggested:</span> {suggestion.suggestedCompany || suggestion.currentCompany} | {suggestion.suggestedRole || suggestion.currentRole}
+                        </p>
+                      )}
+                      <p className="text-sm text-gray-500">{suggestion.reason}</p>
+                    </div>
+                    <button
+                      onClick={() => handleApplySuggestion(suggestion)}
+                      disabled={mappingActionLoading === suggestion.campaignName}
+                      className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {mappingActionLoading === suggestion.campaignName ? 'Applying...' : 'Apply Fix'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
+              <button
+                onClick={() => setShowSuggestions(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Prometheus Campaign Analysis</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              AI-powered campaign batching with internal role matching
-            </p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-sm text-gray-500">
+                AI-powered campaign batching with internal role matching
+              </p>
+              {data?._cache && (
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                  data._cache.hit
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-green-100 text-green-700'
+                }`}>
+                  {data._cache.hit ? (
+                    <>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Cached: {data._cache.fetchedAtIST}
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Fresh: {data._cache.fetchedAtIST}
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
           </div>
-          <button
-            onClick={loadData}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => loadData(false)}
+              className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 flex items-center gap-2"
+              title="Load from cache if available"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+            <button
+              onClick={() => loadData(true)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              title="Force fetch fresh data from APIs"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Force Refresh
+            </button>
+          </div>
         </div>
       </div>
 
@@ -504,7 +950,7 @@ export function CampaignROI(_props: CampaignROIProps) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wide">Total Campaigns</p>
           <p className="text-2xl font-bold text-gray-900">{totalCampaigns}</p>
@@ -515,31 +961,28 @@ export function CampaignROI(_props: CampaignROIProps) {
           </p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Role Batches</p>
-          <p className="text-2xl font-bold text-purple-600">{batches.totalBatches}</p>
-          <p className="text-xs text-gray-400">{matchedCampaigns} campaigns matched</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Stand-alone</p>
-          <p className="text-2xl font-bold text-orange-600">{unmatchedCampaigns}</p>
-          <p className="text-xs text-gray-400">{activeUngrouped} active</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Internal Roles</p>
-          <p className="text-2xl font-bold text-blue-600">{internal.totalRoles}</p>
-          <p className="text-xs text-gray-400">{internal.totalResumes} resumes</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Resumes</p>
+          <p className="text-2xl font-bold text-blue-600">{internal.totalResumes}</p>
+          <p className="text-xs text-gray-400">{paidResumes} paid · {organicResumes} organic</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wide">Total Spend</p>
           <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalSpend)}</p>
+          <p className="text-xs text-gray-400">{formatCurrency(activeSpend)} from live</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wide">Avg CPC</p>
           <p className="text-2xl font-bold text-gray-900">{formatCurrency(avgCPC)}</p>
         </div>
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-sm border border-blue-200 p-4">
+          <p className="text-xs text-blue-700 uppercase tracking-wide">Cost/Resume</p>
+          <p className="text-2xl font-bold text-blue-900">{formatCurrency(costPerResume)}</p>
+          <p className="text-xs text-blue-600">all {totalResumes} resumes</p>
+        </div>
         <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl shadow-sm border border-orange-200 p-4">
-          <p className="text-xs text-orange-700 uppercase tracking-wide">Cost/Resume</p>
-          <p className="text-2xl font-bold text-orange-900">{formatCurrency(costPerResume)}</p>
+          <p className="text-xs text-orange-700 uppercase tracking-wide">Cost/Paid Resume</p>
+          <p className="text-2xl font-bold text-orange-900">{formatCurrency(costPerPaidResume)}</p>
+          <p className="text-xs text-orange-600">live spend ÷ {paidResumes} paid</p>
         </div>
       </div>
 
@@ -623,6 +1066,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                     <SortIcon column="resumes" />
                   </div>
                 </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase bg-blue-50">
+                  Role Details
+                </th>
                 <th
                   className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase bg-orange-50 cursor-pointer hover:bg-orange-100 select-none"
                   onClick={() => handleSort('costPerResume')}
@@ -657,6 +1103,23 @@ export function CampaignROI(_props: CampaignROIProps) {
                   <div className="flex items-center justify-end">
                     CPC
                     <SortIcon column="cpc" />
+                  </div>
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase bg-indigo-50">
+                  <div className="flex items-center justify-center gap-1">
+                    Mapping
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowMappingPanel(!showMappingPanel);
+                      }}
+                      className="ml-1 text-indigo-600 hover:text-indigo-800"
+                      title="View all mappings"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </button>
                   </div>
                 </th>
               </tr>
@@ -712,6 +1175,27 @@ export function CampaignROI(_props: CampaignROIProps) {
                         <span className="text-sm text-gray-400">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-3 bg-blue-50">
+                      {batch.matchedRole ? (
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="text-gray-700 truncate max-w-[150px]" title={normalizeRoleForDisplay(batch.matchedRole.jobTitle, batch.matchedRole.companyName)}>
+                            {normalizeRoleForDisplay(batch.matchedRole.jobTitle, batch.matchedRole.companyName)}
+                          </span>
+                          <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium whitespace-nowrap">
+                            {batch.matchedRole.resumes} resume{batch.matchedRole.resumes !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="text-gray-500 truncate max-w-[150px]" title={batch.role}>
+                            {batch.role}
+                          </span>
+                          <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded font-medium whitespace-nowrap">
+                            0 resumes today
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right bg-orange-50">
                       {batch.costPerResume && batch.costPerResume > 0 ? (
                         <span className={`text-sm font-bold ${batch.costPerResume < 300 ? 'text-green-600' : batch.costPerResume < 500 ? 'text-orange-600' : 'text-red-600'}`}>
@@ -729,6 +1213,68 @@ export function CampaignROI(_props: CampaignROIProps) {
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
                       {formatCurrency(batch.aggregatedMetrics.weightedCPC || 0)}
+                    </td>
+                    <td className="px-4 py-3 text-center bg-indigo-50" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const status = getBatchMappingStatus(batch.batchId);
+                        const isLoading = mappingActionLoading === batch.batchId;
+
+                        if (status === 'approved') {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                              Locked
+                            </span>
+                          );
+                        }
+
+                        if (status === 'mixed') {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-medium">
+                              Partial
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleApproveBatch(batch.batchId, `${batch.company} | ${batch.role}`)}
+                              disabled={isLoading}
+                              className="p-1.5 bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50 transition-colors"
+                              title="Approve - Lock this mapping forever"
+                            >
+                              {isLoading ? (
+                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                const firstMapping = mappings?.mappings.find(m => m.batchId === batch.batchId);
+                                if (firstMapping) {
+                                  setRejectingMapping(firstMapping.campaignName);
+                                }
+                              }}
+                              disabled={isLoading}
+                              className="p-1.5 bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
+                              title="Reject - Mark as incorrect"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                   {/* Expanded campaign details */}
@@ -761,6 +1307,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       <td className="px-4 py-2 text-right text-sm text-gray-400">
                         —
                       </td>
+                      <td className="px-4 py-2 bg-blue-50/50 text-sm text-gray-400">
+                        —
+                      </td>
                       <td className="px-4 py-2 text-right text-sm text-gray-400 bg-orange-50/50">
                         —
                       </td>
@@ -773,6 +1322,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       <td className="px-4 py-2 text-right text-sm text-gray-500">
                         {formatCurrency(campaign.metrics.cpc)}
                       </td>
+                      <td className="px-4 py-2 text-center bg-indigo-50/50 text-sm text-gray-400">
+                        —
+                      </td>
                     </tr>
                   ))}
                 </React.Fragment>
@@ -783,7 +1335,7 @@ export function CampaignROI(_props: CampaignROIProps) {
                 <>
                   {viewMode === 'all' && (
                     <tr className="bg-orange-50">
-                      <td colSpan={7} className="px-4 py-2 text-sm font-semibold text-orange-800">
+                      <td colSpan={9} className="px-4 py-2 text-sm font-semibold text-orange-800">
                         Stand-alone Campaigns ({sortedUngrouped.length})
                       </td>
                     </tr>
@@ -814,6 +1366,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       <td className="px-4 py-3 text-right text-sm text-gray-400">
                         —
                       </td>
+                      <td className="px-4 py-3 bg-blue-50 text-sm text-gray-400">
+                        —
+                      </td>
                       <td className="px-4 py-3 text-right text-sm text-gray-400 bg-orange-50">
                         —
                       </td>
@@ -826,6 +1381,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       <td className="px-4 py-3 text-right text-sm text-gray-600">
                         {formatCurrency(campaign.cpc || 0)}
                       </td>
+                      <td className="px-4 py-3 text-center bg-indigo-50 text-sm text-gray-400">
+                        —
+                      </td>
                     </tr>
                   ))}
                 </>
@@ -834,6 +1392,122 @@ export function CampaignROI(_props: CampaignROIProps) {
           </table>
         </div>
       </div>
+
+      {/* Rejection Modal */}
+      {rejectingMapping && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Reject Mapping</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Rejecting: <span className="font-medium">{rejectingMapping}</span>
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Why is this mapping incorrect?
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="e.g., This should map to 'Backend Engineer' not 'AI Engineer'"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setRejectingMapping(null);
+                  setRejectionReason('');
+                }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleRejectMapping(rejectingMapping, rejectionReason)}
+                disabled={!rejectionReason.trim() || mappingActionLoading === rejectingMapping}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {mappingActionLoading === rejectingMapping ? 'Analyzing...' : 'Reject & Analyze'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mapping Summary Panel */}
+      {showMappingPanel && mappings && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Campaign Mappings</h3>
+                <p className="text-sm text-gray-500">
+                  {mappings.approved} approved (locked) · {mappings.pending} pending · {mappings.rejected} rejected
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMappingPanel(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[60vh]">
+              <table className="w-full">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Campaign</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Company</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Role</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {mappings.mappings.map((mapping, idx) => (
+                    <tr key={idx} className={`hover:bg-gray-50 ${mapping.approved ? 'bg-green-50/30' : mapping.rejected ? 'bg-red-50/30' : ''}`}>
+                      <td className="px-4 py-2 text-sm text-gray-900 max-w-[200px] truncate" title={mapping.campaignName}>
+                        {mapping.campaignName}
+                      </td>
+                      <td className="px-4 py-2 text-sm font-medium text-gray-900">{mapping.company}</td>
+                      <td className="px-4 py-2 text-sm text-gray-700">{mapping.role}</td>
+                      <td className="px-4 py-2 text-center">
+                        {mapping.approved ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                            Locked
+                          </span>
+                        ) : mapping.rejected ? (
+                          <span className="inline-flex items-center px-2 py-0.5 bg-red-100 text-red-800 rounded-full text-xs font-medium" title={mapping.rejectionReason}>
+                            Rejected
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-xs font-medium">
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${mapping.source === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {mapping.source || 'ai'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 text-xs text-gray-500">
+              Last updated: {new Date(mappings.lastUpdated).toLocaleString()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Organic Resumes Section */}
       {organicRoles.length > 0 && (
@@ -913,58 +1587,6 @@ export function CampaignROI(_props: CampaignROIProps) {
         </div>
       )}
 
-      {/* Summary Stats */}
-      {organicRoles.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-gray-500 uppercase">Paid Resumes</p>
-              <p className="text-xl font-bold text-purple-600">{paidResumes}</p>
-              <p className="text-xs text-gray-400">{totalResumes > 0 ? ((paidResumes / totalResumes) * 100).toFixed(1) : 0}% of total</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 uppercase">Organic Resumes</p>
-              <p className="text-xl font-bold text-green-600">{organicResumes}</p>
-              <p className="text-xs text-gray-400">{totalResumes > 0 ? ((organicResumes / totalResumes) * 100).toFixed(1) : 0}% of total</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 uppercase">Effective Cost/Resume</p>
-              <p className="text-xl font-bold text-orange-600">{formatCurrency(paidResumes > 0 ? totalSpend / paidResumes : 0)}</p>
-              <p className="text-xs text-gray-400">paid resumes only</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Internal Roles Reference */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-900">Internal Roles (Grapevine)</h3>
-          <p className="text-sm text-gray-500">
-            {internal.totalRoles} active roles with {internal.totalResumes} total resumes
-          </p>
-        </div>
-        <div className="overflow-x-auto max-h-64">
-          <table className="w-full">
-            <thead className="bg-gray-50 sticky top-0">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Company</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Role</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">Resumes</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {internal.roles.slice(0, 50).map((role, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-sm text-gray-900">{role.companyName}</td>
-                  <td className="px-4 py-2 text-sm text-gray-700">{role.jobTitle}</td>
-                  <td className="px-4 py-2 text-right text-sm font-medium text-blue-600">{role.resumes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

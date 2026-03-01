@@ -15,23 +15,41 @@ const TOKEN_KEY = 'prometheus_auth_token';
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authDisabled, setAuthDisabled] = useState(false);
 
-  // Check for existing token on mount
+  // Check for existing token on mount OR if auth is disabled
   useEffect(() => {
-    const savedToken = localStorage.getItem(TOKEN_KEY);
-    if (savedToken) {
-      // Verify token is still valid
-      verifyToken(savedToken).then((valid) => {
+    const checkAuth = async () => {
+      try {
+        // First check if auth is disabled on backend
+        const healthRes = await fetch('/api/health');
+        const health = await healthRes.json();
+
+        if (health.authDisabled) {
+          setAuthDisabled(true);
+          setToken('disabled'); // Set a dummy token
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        // If health check fails, continue with normal auth
+      }
+
+      // Normal auth flow
+      const savedToken = localStorage.getItem(TOKEN_KEY);
+      if (savedToken) {
+        // Verify token is still valid
+        const valid = await verifyToken(savedToken);
         if (valid) {
           setToken(savedToken);
         } else {
           localStorage.removeItem(TOKEN_KEY);
         }
-        setIsLoading(false);
-      });
-    } else {
+      }
       setIsLoading(false);
-    }
+    };
+
+    checkAuth();
   }, []);
 
   const verifyToken = async (tokenToVerify: string): Promise<boolean> => {

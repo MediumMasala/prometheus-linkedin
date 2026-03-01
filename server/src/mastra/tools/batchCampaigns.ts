@@ -4,6 +4,11 @@ import {
   aggregateBatchMetrics,
   buildVariantBreakdown,
 } from '../../lib/utils.js';
+import {
+  getBatchForCampaign,
+  saveAIBatchingResults,
+  getCampaignsNeedingAI,
+} from '../../lib/batching-rules.js';
 import type {
   CampaignBatch,
   CampaignVariant,
@@ -45,6 +50,54 @@ interface AIBatchingResult {
 }
 
 /**
+ * Strip company name prefix from role name
+ * "Sarvam Machine Learning Engineer" → "Machine Learning Engineer"
+ * "Stealth VP/SVP Engineering" → "VP/SVP Engineering"
+ */
+function normalizeRoleName(role: string, company: string): string {
+  if (!role || !company) return role;
+
+  let normalized = role.trim();
+  const companyLower = company.toLowerCase().trim();
+  let currentLower = normalized.toLowerCase();
+
+  // Check if role starts with company name (exact or with space/dash after)
+  if (currentLower.startsWith(companyLower + ' ') || currentLower.startsWith(companyLower + '-')) {
+    normalized = normalized.slice(company.length).trim();
+    normalized = normalized.replace(/^[-–—:|\s]+/, '').trim();
+    return normalized || role;
+  }
+
+  // Check exact company prefix (for cases like "SarvamBackend" → less common)
+  if (currentLower.startsWith(companyLower) && currentLower.length > companyLower.length) {
+    const nextChar = currentLower[companyLower.length];
+    // Only strip if followed by space, dash, or uppercase (new word)
+    if (nextChar === ' ' || nextChar === '-' || normalized[company.length] === normalized[company.length].toUpperCase()) {
+      normalized = normalized.slice(company.length).trim();
+      normalized = normalized.replace(/^[-–—:|\s]+/, '').trim();
+      return normalized || role;
+    }
+  }
+
+  // Try variations without spaces
+  const variations = [
+    company.replace(/\s+/g, ''),      // "WaterlabsAI"
+    company.replace(/\s+/g, '-'),     // "Waterlabs-AI"
+  ];
+
+  for (const variant of variations) {
+    const variantLower = variant.toLowerCase();
+    if (currentLower.startsWith(variantLower + ' ') || currentLower.startsWith(variantLower + '-')) {
+      normalized = normalized.slice(variant.length).trim();
+      normalized = normalized.replace(/^[-–—:|\s]+/, '').trim();
+      return normalized || role;
+    }
+  }
+
+  return role; // Return original if no prefix found
+}
+
+/**
  * Call OpenAI to match campaigns to internal roles
  */
 async function callOpenAIForBatching(
@@ -55,41 +108,76 @@ async function callOpenAIForBatching(
     return [];
   }
 
-  // Build the list of available roles
+  // Build the list of available roles with normalized names
   const rolesContext = internalRoles
     .slice(0, 50) // Limit to top 50 roles
-    .map((r, i) => `${i + 1}. Company: "${r.companyName}", Role: "${r.jobTitle}" (${r.resumes} resumes)`)
+    .map((r, i) => {
+      // Normalize the role name by stripping company prefix
+      const normalizedRole = normalizeRoleName(r.jobTitle, r.companyName);
+      return `${i + 1}. Company: "${r.companyName}", Role: "${normalizedRole}" [Backend: "${r.jobTitle}"] (${r.resumes} resumes)`;
+    })
     .join('\n');
 
   const campaignsContext = campaigns
     .map((c, i) => `${i + 1}. "${c.name}" (ID: ${c.campaignId})`)
     .join('\n');
 
-  const systemPrompt = `You are an expert at matching LinkedIn advertising campaigns to job roles.
+  const systemPrompt = `You are matching LinkedIn campaigns to internal job roles.
 
-You have a list of INTERNAL JOB ROLES that companies are actively hiring for.
-You need to match each LINKEDIN CAMPAIGN to the most appropriate internal role.
+INTERNAL ROLES LIST: These are from the backend database. Use their EXACT names.
+LINKEDIN CAMPAIGNS: These need to be matched to internal roles.
 
-IMPORTANT RULES:
-1. Match campaigns to roles based on COMPANY NAME and JOB TITLE similarity
-2. "Sarvam - AI Backend - Company TG" should match role "AI Backend Engineer" at "Sarvam"
-3. "Sarvam - ML Eng - pedigree" should match role "ML Engineer" at "Sarvam"
-4. Different roles at the same company should be SEPARATE batches (e.g., "AI Backend" and "ML Engineer" are different)
-5. Campaign variants (Pedigree, Company TG, etc.) don't affect the role matching - they're targeting variants
-6. If no good match exists, set matchedRoleKey to null
+COMPANY ALIASES (these are the SAME company):
+- AFB = AppsForBharat = Apps For Bharat = AppsforbBharat
+- Shaadi account runs campaigns for: Stealth, AFB, Arintra (check campaign name)
+- FamPay = Fampay
+- Waterlabs AI = WaterlabsAI = Waterlabs
+- kAIgentic = Kaigentic = KAIgentic
+- Zilo = ZILO
+- Zoop = ZOOP
+- Seekho = SEEKHO
 
-Return ONLY a JSON array:
-[
-  {"campaignId": "id", "matchedRoleKey": "CompanyName|JobTitle" or null, "confidence": "high|medium|low"}
-]`;
+CRITICAL RULES:
+1. NEVER prefix role names with company name
+   - WRONG: "Sarvam Machine Learning Engineer"
+   - CORRECT: "Machine Learning Engineer"
 
-  const userPrompt = `INTERNAL JOB ROLES (companies actively hiring):
+2. Match company using aliases above
+   - Campaign: "AFB - Backend Tech Lead"
+   - Internal role: "Backend Tech Lead" at "AppsForBharat"
+   - matchedRoleKey: "AppsForBharat|Backend Tech Lead" (use backend's company name)
+
+3. If internal role exists, copy its EXACT jobTitle and companyName
+   - Internal role: "ML Engineer" at "Sarvam"
+   - Campaign: "Sarvam - ML Eng - pedigree"
+   - matchedRoleKey: "Sarvam|ML Engineer"
+
+4. If NO internal role exists, extract clean role WITHOUT company prefix
+   - Campaign: "Waterlabs AI - AI Product Manager"
+   - matchedRoleKey: "Waterlabs AI|AI Product Manager"
+
+5. Campaign format: "Account - Company - Role - Variant" or "Company - Role - Variant"
+   - "Shaadi - Stealth - VP Engineering" → Company: Stealth
+   - "AFB - Backend Tech Lead - Industry TG" → Company: AppsForBharat (use backend name)
+   - Ignore variants: "Company TG", "Pedigree", "JT", "Agency TG", "Industry TG"
+
+Return JSON array:
+[{"campaignId": "id", "matchedRoleKey": "BackendCompanyName|CleanRoleName", "confidence": "high|medium|low"}]
+
+IMPORTANT: Use the company name AS IT APPEARS IN THE INTERNAL ROLES LIST, not the campaign abbreviation!`;
+
+  const userPrompt = `INTERNAL ROLES (use EXACT jobTitle from this list):
 ${rolesContext}
 
-LINKEDIN CAMPAIGNS to match:
+CAMPAIGNS TO MATCH:
 ${campaignsContext}
 
-Match each campaign to the most appropriate internal role. Use the format "CompanyName|JobTitle" for matchedRoleKey.`;
+For each campaign:
+1. Find matching internal role by company + similar job title
+2. Use the EXACT jobTitle from internal roles (e.g., "ML Engineer", not "Sarvam ML Engineer")
+3. If no match, extract clean role WITHOUT company prefix
+
+Format: "CompanyName|JobTitle" where JobTitle has NO company prefix`;
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -197,25 +285,57 @@ export const batchCampaignsTool = createTool({
       roleMap.set(key, role);
     }
 
-    // Call OpenAI to match campaigns to roles
-    let aiResults: AIBatchingResult[] = [];
-    console.log('[Tool: batchCampaigns] getOpenAIKey() present:', !!getOpenAIKey());
-    console.log('[Tool: batchCampaigns] getOpenAIKey() first 20 chars:', getOpenAIKey().substring(0, 20));
-    console.log('[Tool: batchCampaigns] internalRoles count:', internalRoles.length);
+    // STEP 1: Check saved batching rules first
+    const savedBatchResults = new Map<string, { company: string; role: string; batchId: string }>();
+    const campaignsNeedingAI: { campaignId: string; name: string }[] = [];
 
-    if (getOpenAIKey() && internalRoles.length > 0) {
-      console.log('[Tool: batchCampaigns] Calling OpenAI to match campaigns to internal roles...');
+    for (const campaign of campaigns) {
+      const savedBatch = getBatchForCampaign(campaign.name);
+      if (savedBatch) {
+        savedBatchResults.set(campaign.campaignId, savedBatch);
+      } else {
+        campaignsNeedingAI.push({ campaignId: campaign.campaignId, name: campaign.name });
+      }
+    }
+
+    console.log(`[Tool: batchCampaigns] Found ${savedBatchResults.size} campaigns in saved rules`);
+    console.log(`[Tool: batchCampaigns] ${campaignsNeedingAI.length} campaigns need AI batching`);
+
+    // STEP 2: Call OpenAI only for campaigns not in saved rules
+    let aiResults: AIBatchingResult[] = [];
+
+    if (campaignsNeedingAI.length > 0 && getOpenAIKey() && internalRoles.length > 0) {
+      console.log('[Tool: batchCampaigns] Calling OpenAI for remaining campaigns...');
       try {
-        aiResults = await callOpenAIForBatching(
-          campaigns.map((c) => ({ campaignId: c.campaignId, name: c.name })),
-          internalRoles
-        );
+        aiResults = await callOpenAIForBatching(campaignsNeedingAI, internalRoles);
         console.log('[Tool: batchCampaigns] OpenAI returned', aiResults.length, 'results');
+
+        // Save AI results for future use - normalize role names to remove company prefixes
+        const newMappings = aiResults
+          .filter(r => r.matchedRoleKey)
+          .map(r => {
+            const campaign = campaignsNeedingAI.find(c => c.campaignId === r.campaignId);
+            const [company, rawRole] = (r.matchedRoleKey || '').split('|');
+            // Strip company prefix from role name
+            const role = normalizeRoleName(rawRole, company);
+            return {
+              campaignName: campaign?.name || '',
+              company,
+              role,
+              batchId: `${company.toLowerCase().replace(/\s+/g, '-')}-${role.toLowerCase().replace(/\s+/g, '-')}`,
+            };
+          })
+          .filter(m => m.campaignName);
+
+        if (newMappings.length > 0) {
+          saveAIBatchingResults(newMappings);
+          console.log(`[Tool: batchCampaigns] Saved ${newMappings.length} new batching rules`);
+        }
       } catch (err) {
         console.error('[Tool: batchCampaigns] OpenAI call threw error:', err);
       }
-    } else {
-      console.log('[Tool: batchCampaigns] Skipping OpenAI - API key:', !!getOpenAIKey(), 'roles:', internalRoles.length);
+    } else if (campaignsNeedingAI.length === 0) {
+      console.log('[Tool: batchCampaigns] All campaigns found in saved rules - skipping OpenAI!');
     }
 
     // Build batches based on matched roles
@@ -227,6 +347,7 @@ export const batchCampaignsTool = createTool({
     const aiResultMap = new Map(aiResults.map((r) => [r.campaignId, r]));
 
     for (const campaign of campaigns) {
+      const savedBatch = savedBatchResults.get(campaign.campaignId);
       const aiResult = aiResultMap.get(campaign.campaignId);
       const variantType = detectVariant(campaign.name);
 
@@ -245,8 +366,16 @@ export const batchCampaignsTool = createTool({
         },
       };
 
-      if (aiResult?.matchedRoleKey) {
-        // Campaign matched to a role
+      // Check saved rules first, then AI results
+      if (savedBatch) {
+        // Use saved batching rule
+        const roleKey = `${savedBatch.company}|${savedBatch.role}`;
+        if (!batchMap.has(roleKey)) {
+          batchMap.set(roleKey, []);
+        }
+        batchMap.get(roleKey)!.push(campaignVariant);
+      } else if (aiResult?.matchedRoleKey) {
+        // Campaign matched to a role via AI
         if (!batchMap.has(aiResult.matchedRoleKey)) {
           batchMap.set(aiResult.matchedRoleKey, []);
         }
