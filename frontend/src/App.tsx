@@ -24,6 +24,7 @@ const SIDEBAR_TABS = [
   { id: 'tal-ads', label: 'Tal Ads', icon: 'megaphone' },
   { id: 'tal-character-marketing', label: 'Tal Character Marketing', icon: 'users' },
   { id: 'ai-seo', label: 'AI SEO', icon: 'search' },
+  { id: 'idea-icebox', label: 'Idea Ice-box', icon: 'lightbulb' },
   { id: 'settings', label: 'Settings', icon: 'settings', adminOnly: true },
 ];
 
@@ -121,6 +122,12 @@ function AppContent() {
         return (
           <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        );
+      case 'lightbulb':
+        return (
+          <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
         );
       default:
@@ -337,6 +344,21 @@ function AppContent() {
                   </svg>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">AI SEO</h3>
+                <p className="text-gray-500">Coming soon</p>
+              </div>
+            </div>
+          )}
+
+          {/* Idea Ice-box - Placeholder */}
+          {activeSidebarTab === 'idea-icebox' && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Idea Ice-box</h3>
                 <p className="text-gray-500">Coming soon</p>
               </div>
             </div>
