@@ -20,13 +20,13 @@ function formatNumber(value: number): string {
 
 // Main sidebar navigation tabs
 const SIDEBAR_TABS = [
-  { id: 'round-one-ads', label: 'Round One Ads', icon: 'chart' },
+  { id: 'round-one-ads', label: 'Round1AI Ads', icon: 'chart' },
   { id: 'tal-ads', label: 'Tal Ads', icon: 'megaphone' },
   { id: 'tal-character-marketing', label: 'Tal Character Marketing', icon: 'users' },
   { id: 'settings', label: 'Settings', icon: 'settings', adminOnly: true },
 ];
 
-// Sub-tabs for Round One Ads section
+// Sub-tabs for Round1AI Ads section
 const ROUND_ONE_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'campaigns', label: 'Campaign Performance' },
@@ -203,7 +203,7 @@ function AppContent() {
           </div>
         </header>
 
-        {/* Round One Ads - Sub Tabs */}
+        {/* Round1AI Ads - Sub Tabs */}
         {activeSidebarTab === 'round-one-ads' && (
           <div className="bg-white border-b border-gray-200">
             <div className="px-6">
@@ -214,7 +214,7 @@ function AppContent() {
 
         {/* Content */}
         <main className="flex-1 p-6 overflow-auto">
-          {/* Round One Ads Content */}
+          {/* Round1AI Ads Content */}
           {activeSidebarTab === 'round-one-ads' && (
             <>
               {activeSubTab === 'overview' && (
