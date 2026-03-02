@@ -163,7 +163,7 @@ export function LoginPage() {
              style={{ boxShadow: '0 25px 50px -12px rgba(251, 146, 60, 0.25)' }}>
           {/* Header */}
           <div className="text-center mb-6 pt-8">
-            <h1 className="text-2xl font-bold text-gray-800 mb-1">Welcome Back!</h1>
+            <h1 className="text-2xl font-bold text-gray-800 mb-1">Welcome to Prometheus v2!</h1>
             <p className="text-gray-500 text-sm">Sign in to Prometheus</p>
           </div>
 
