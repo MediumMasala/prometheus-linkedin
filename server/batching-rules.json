@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdated": "2026-03-01T08:05:55.564Z",
+  "lastUpdated": "2026-03-02T07:21:33.427Z",
   "rules": [],
   "manualMappings": {
     "AFB - Performace Marketing": {
@@ -130,6 +130,27 @@
       "batchId": "zilo-sm",
       "source": "ai",
       "createdAt": "2026-03-01T07:55:38.999Z"
+    },
+    "Superliving - Associate Director Analytics - Company +JT TG": {
+      "company": "SuperLiving",
+      "role": "Associate Director - Analytics",
+      "batchId": "superliving-associate-director---analytics",
+      "source": "ai",
+      "createdAt": "2026-03-02T07:21:33.426Z"
+    },
+    "Superliving - Frontend Engineer - Company TG": {
+      "company": "SuperLiving",
+      "role": "Frontend Engineer",
+      "batchId": "superliving-frontend-engineer",
+      "source": "ai",
+      "createdAt": "2026-03-02T07:21:33.426Z"
+    },
+    "Superliving - Associate Director Growth - Company TG": {
+      "company": "SuperLiving",
+      "role": "Associate Director Growth",
+      "batchId": "superliving-associate-director-growth",
+      "source": "ai",
+      "createdAt": "2026-03-02T07:21:33.426Z"
     }
   }
 }
