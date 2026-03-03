@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { runPrometheusAnalysis } from './mastra/index.js';
 import { fetchLinkedInCampaignsTool } from './mastra/tools/fetchLinkedInCampaigns.js';
+import { clearLinkedInCache } from './lib/linkedin-api.js';
 import { batchCampaignsTool } from './mastra/tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './mastra/tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './mastra/tools/mapAndReconcile.js';
@@ -457,8 +458,9 @@ app.post('/api/prometheus/analyze', async (req, res) => {
         return res.json(result);
       }
     } else {
-      console.log('[API] Force refresh requested - bypassing cache');
+      console.log('[API] Force refresh requested - clearing all caches');
       invalidateCache(effectiveStart, effectiveEnd);
+      clearLinkedInCache(); // Also clear LinkedIn API cache
     }
 
     // Cache miss or force refresh - run full analysis
