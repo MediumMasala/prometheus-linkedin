@@ -724,11 +724,6 @@ export function CampaignROI(_props: CampaignROIProps) {
   const unmatchedCampaigns = batches.ungrouped.length;
   const totalCampaigns = matchedCampaigns + unmatchedCampaigns;
 
-  // Count active vs paused
-  const activeBatched = batches.batches.reduce((sum, b) => sum + b.campaigns.filter(c => c.status === 'ACTIVE').length, 0);
-  const activeUngrouped = batches.ungrouped.filter((c: any) => c.status === 'ACTIVE').length;
-  const totalActive = activeBatched + activeUngrouped;
-
   // Resume campaigns spend (batched + ungrouped, excludes WhatsApp since they're separated in backend)
   const resumeCampaignsSpend = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0) +
     batches.ungrouped.reduce((sum, c) => sum + c.spend, 0);
