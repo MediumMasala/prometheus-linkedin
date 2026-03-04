@@ -5,37 +5,14 @@ import { batchCampaignsTool } from './tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './tools/mapAndReconcile.js';
 
-// Video pipeline tools
-import {
-  characterContextTool,
-  characterProfileTool,
-  topicGeneratorTool,
-  researchGeneratorTool,
-  scriptGeneratorTool,
-  ttsGeneratorTool,
-  scenePlannerTool,
-  videoPipelineTools,
-  videoPipelineToolsArray,
-} from './tools/video-pipeline/index.js';
+// Video pipeline tools - will be added in separate deployment
+// import { ... } from './tools/video-pipeline/index.js';
 
 // Export Prometheus tools for direct use
 export { fetchLinkedInCampaignsTool };
 export { batchCampaignsTool };
 export { fetchInternalDataTool };
 export { mapAndReconcileTool };
-
-// Export Video Pipeline tools
-export {
-  characterContextTool,
-  characterProfileTool,
-  topicGeneratorTool,
-  researchGeneratorTool,
-  scriptGeneratorTool,
-  ttsGeneratorTool,
-  scenePlannerTool,
-  videoPipelineTools,
-  videoPipelineToolsArray,
-};
 
 // Export the agent
 export { prometheusAgent } from './agents/prometheus.js';
