@@ -728,7 +728,6 @@ export function CampaignROI(_props: CampaignROIProps) {
   const activeBatched = batches.batches.reduce((sum, b) => sum + b.campaigns.filter(c => c.status === 'ACTIVE').length, 0);
   const activeUngrouped = batches.ungrouped.filter((c: any) => c.status === 'ACTIVE').length;
   const totalActive = activeBatched + activeUngrouped;
-  const totalPaused = totalCampaigns - totalActive;
 
   // Resume campaigns spend (batched + ungrouped, excludes WhatsApp since they're separated in backend)
   const resumeCampaignsSpend = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0) +
@@ -767,8 +766,6 @@ export function CampaignROI(_props: CampaignROIProps) {
     batches.ungrouped.reduce((sum, c) => sum + (c.impressions || 0), 0);
   const paidLPClicks = totalClicks; // LP clicks from paid campaigns
   const paidCPC = paidLPClicks > 0 ? paidSpend / paidLPClicks : 0;
-  const avgCPC = paidLPClicks > 0 ? paidSpend / paidLPClicks : 0;
-  const costPerResume = totalResumes > 0 ? paidSpend / totalResumes : 0;
 
   // Cost per Paid Resume = Total Paid Spend / Paid Resumes
   const costPerPaidResume = paidResumes > 0 ? paidSpend / paidResumes : 0;
