@@ -169,14 +169,14 @@ function AppContent() {
               <li key={tab.id}>
                 <button
                   onClick={() => setActiveSidebarTab(tab.id)}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left whitespace-nowrap ${
                     activeSidebarTab === tab.id
                       ? 'bg-orange-50 text-orange-700 border border-orange-200'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
                   {renderSidebarIcon(tab.icon, activeSidebarTab === tab.id)}
-                  {tab.label}
+                  <span className="truncate">{tab.label}</span>
                 </button>
               </li>
             ))}
