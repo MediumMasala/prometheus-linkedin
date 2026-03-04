@@ -7,18 +7,31 @@ import type { CampaignDailySnapshot, BreachedCampaign } from '../types.js';
 
 /**
  * Calculate cost per resume and identify breaches
+ * CPR = Live Spend / Paid Resumes (only for ACTIVE/live roles)
  */
 function calculateBreaches(campaigns: CampaignDailySnapshot[]): BreachedCampaign[] {
   const breached: BreachedCampaign[] = [];
 
   for (const campaign of campaigns) {
-    // Skip campaigns with minimal spend
-    if (campaign.spendToday < ALERT_CONFIG.minimumSpendForAlert) {
+    // Use live spend if available, otherwise fall back to total spend
+    const liveSpend = campaign.liveSpendToday ?? campaign.spendToday;
+
+    // Use paid resumes if available, otherwise fall back to total resumes
+    const paidResumes = campaign.paidResumesToday ?? campaign.resumesToday;
+
+    // Skip campaigns with minimal live spend
+    if (liveSpend < ALERT_CONFIG.minimumSpendForAlert) {
       continue;
     }
 
-    const costPerResume = campaign.resumesToday > 0
-      ? campaign.spendToday / campaign.resumesToday
+    // Skip if role is not live (if specified)
+    if (campaign.isLive === false) {
+      continue;
+    }
+
+    // CPR = Live Spend / Paid Resumes
+    const costPerResume = paidResumes > 0
+      ? liveSpend / paidResumes
       : Infinity;
 
     // Update the campaign's CPR

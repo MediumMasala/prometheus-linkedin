@@ -93,6 +93,16 @@ interface CacheInfo {
   cacheKey: string;
 }
 
+interface WhatsAppCampaign {
+  campaignId: string;
+  name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  landingPageClicks: number;
+  status: string;
+}
+
 interface PrometheusResponse {
   linkedIn: {
     campaigns: any[];
@@ -107,6 +117,10 @@ interface PrometheusResponse {
     batches: CampaignBatch[];
     ungrouped: any[];
     totalBatches: number;
+    whatsappCampaigns?: WhatsAppCampaign[];
+    stats?: {
+      whatsappSpend?: number;
+    };
   };
   report: string;
   _cache?: CacheInfo;
@@ -716,23 +730,12 @@ export function CampaignROI(_props: CampaignROIProps) {
   const totalActive = activeBatched + activeUngrouped;
   const totalPaused = totalCampaigns - totalActive;
 
-  const totalSpend = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0) +
+  // Resume campaigns spend (batched + ungrouped, excludes WhatsApp since they're separated in backend)
+  const resumeCampaignsSpend = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0) +
     batches.ungrouped.reduce((sum, c) => sum + c.spend, 0);
   const totalClicks = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalLandingPageClicks, 0) +
     batches.ungrouped.reduce((sum, c) => sum + c.landingPageClicks, 0);
   const totalResumes = internal.totalResumes;
-  const avgCPC = totalClicks > 0 ? totalSpend / totalClicks : 0;
-  const costPerResume = totalResumes > 0 ? totalSpend / totalResumes : 0;
-
-  // Calculate spend from ACTIVE campaigns only
-  const activeSpend = batches.batches.reduce((sum, b) => {
-    const activeCampaignSpend = b.campaigns
-      .filter(c => c.status === 'ACTIVE')
-      .reduce((s, c) => s + c.metrics.spend, 0);
-    return sum + activeCampaignSpend;
-  }, 0) + batches.ungrouped
-    .filter((c: any) => c.status === 'ACTIVE')
-    .reduce((sum: number, c: any) => sum + (c.spend || 0), 0);
 
   // Calculate organic roles - internal roles NOT matched to any LinkedIn campaign
   // Using the already-computed matchedRole from enrichedBatches (one batch = one role)
@@ -749,8 +752,26 @@ export function CampaignROI(_props: CampaignROIProps) {
   const organicResumes = organicRoles.reduce((sum, r) => sum + r.resumes, 0);
   const paidResumes = totalResumes - organicResumes;
 
-  // Cost per Paid Resume = Active campaign spend / Paid resumes only
-  const costPerPaidResume = paidResumes > 0 ? activeSpend / paidResumes : 0;
+  // WhatsApp campaigns data
+  const whatsappCampaigns = batches.whatsappCampaigns || [];
+  const whatsappSpend = batches.stats?.whatsappSpend || whatsappCampaigns.reduce((sum, c) => sum + (c.spend || 0), 0);
+  const whatsappClicks = whatsappCampaigns.reduce((sum, c) => sum + (c.landingPageClicks || 0), 0);
+  const whatsappImpressions = whatsappCampaigns.reduce((sum, c) => sum + (c.impressions || 0), 0);
+  const whatsappCTR = whatsappImpressions > 0 ? (whatsappClicks / whatsappImpressions) * 100 : 0;
+  const whatsappCPC = whatsappClicks > 0 ? whatsappSpend / whatsappClicks : 0;
+
+  // CORRECT totals: Resume campaigns + WhatsApp = Total LinkedIn spend
+  const totalSpend = resumeCampaignsSpend + whatsappSpend;
+  const paidSpend = resumeCampaignsSpend; // Paid = Resume acquisition campaigns (already excludes WhatsApp)
+  const paidImpressions = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalImpressions, 0) +
+    batches.ungrouped.reduce((sum, c) => sum + (c.impressions || 0), 0);
+  const paidLPClicks = totalClicks; // LP clicks from paid campaigns
+  const paidCPC = paidLPClicks > 0 ? paidSpend / paidLPClicks : 0;
+  const avgCPC = paidLPClicks > 0 ? paidSpend / paidLPClicks : 0;
+  const costPerResume = totalResumes > 0 ? paidSpend / totalResumes : 0;
+
+  // Cost per Paid Resume = Total Paid Spend / Paid Resumes
+  const costPerPaidResume = paidResumes > 0 ? paidSpend / paidResumes : 0;
 
   return (
     <div className="space-y-6">
@@ -954,42 +975,120 @@ export function CampaignROI(_props: CampaignROIProps) {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Campaigns</p>
-          <p className="text-2xl font-bold text-gray-900">{totalCampaigns}</p>
-          <p className="text-xs">
-            <span className="text-green-600">{totalActive} live</span>
-            {' · '}
-            <span className="text-amber-600">{totalPaused} paused</span>
-          </p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Resumes</p>
-          <p className="text-2xl font-bold text-blue-600">{internal.totalResumes}</p>
-          <p className="text-xs text-gray-400">{paidResumes} paid · {organicResumes} organic</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Spend</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalSpend)}</p>
-          <p className="text-xs text-gray-400">{formatCurrency(activeSpend)} from live</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Avg CPC</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrency(avgCPC)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-sm border border-blue-200 p-4">
-          <p className="text-xs text-blue-700 uppercase tracking-wide">Cost/Resume</p>
-          <p className="text-2xl font-bold text-blue-900">{formatCurrency(costPerResume)}</p>
-          <p className="text-xs text-blue-600">all {totalResumes} resumes</p>
-        </div>
-        <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl shadow-sm border border-orange-200 p-4">
-          <p className="text-xs text-orange-700 uppercase tracking-wide">Cost/Paid Resume</p>
-          <p className="text-2xl font-bold text-orange-900">{formatCurrency(costPerPaidResume)}</p>
-          <p className="text-xs text-orange-600">live spend ÷ {paidResumes} paid</p>
+      {/* Section 1: Spend Overview */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Spend Overview</h3>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 uppercase">Total Spend</p>
+            <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalSpend)}</p>
+            <p className="text-xs text-gray-400">All LinkedIn</p>
+          </div>
+          <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+            <p className="text-xs text-blue-600 uppercase">Paid (Resume)</p>
+            <p className="text-2xl font-bold text-blue-700">{formatCurrency(paidSpend)}</p>
+            <p className="text-xs text-blue-500">{totalCampaigns - whatsappCampaigns.length} campaigns</p>
+          </div>
+          <div className="text-center p-3 bg-emerald-50 rounded-lg border border-emerald-100">
+            <p className="text-xs text-emerald-600 uppercase">WhatsApp</p>
+            <p className="text-2xl font-bold text-emerald-700">{formatCurrency(whatsappSpend)}</p>
+            <p className="text-xs text-emerald-500">{whatsappCampaigns.length} campaigns</p>
+          </div>
         </div>
       </div>
+
+      {/* Section 2: Paid Campaigns Metrics */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Paid Campaigns (Resume Acquisition)</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 uppercase">Spend</p>
+            <p className="text-xl font-bold text-gray-900">{formatCurrency(paidSpend)}</p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 uppercase">Impressions</p>
+            <p className="text-xl font-bold text-gray-900">{formatNumber(paidImpressions)}</p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 uppercase">LP Clicks</p>
+            <p className="text-xl font-bold text-gray-900">{formatNumber(paidLPClicks)}</p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-500 uppercase">CPC</p>
+            <p className="text-xl font-bold text-gray-900">{formatCurrency(paidCPC)}</p>
+          </div>
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-xs text-blue-600 uppercase">Paid Resumes</p>
+            <p className="text-xl font-bold text-blue-700">{paidResumes}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Cost Metrics (Highlighted) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl shadow-sm border border-orange-200 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-orange-700 uppercase tracking-wide font-semibold">Cost / Paid Resume</p>
+              <p className="text-3xl font-bold text-orange-900 mt-1">{formatCurrency(costPerPaidResume)}</p>
+              <p className="text-sm text-orange-600 mt-1">
+                {formatCurrency(paidSpend)} ÷ {paidResumes} resumes
+              </p>
+            </div>
+            <div className="text-orange-300">
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-sm border border-blue-200 p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-blue-700 uppercase tracking-wide font-semibold">Total Resumes</p>
+              <p className="text-3xl font-bold text-blue-900 mt-1">{totalResumes}</p>
+              <p className="text-sm text-blue-600 mt-1">
+                {paidResumes} paid · {organicResumes} organic
+              </p>
+            </div>
+            <div className="text-blue-300">
+              <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 4: WhatsApp Metrics */}
+      {whatsappCampaigns.length > 0 && (
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl shadow-sm border border-emerald-200 p-4">
+          <h3 className="text-sm font-semibold text-emerald-800 mb-3 uppercase tracking-wide flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+            </svg>
+            WhatsApp Acquisition
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-3 bg-white/60 rounded-lg">
+              <p className="text-xs text-emerald-600 uppercase">Spend</p>
+              <p className="text-xl font-bold text-emerald-800">{formatCurrency(whatsappSpend)}</p>
+            </div>
+            <div className="p-3 bg-white/60 rounded-lg">
+              <p className="text-xs text-emerald-600 uppercase">Impressions</p>
+              <p className="text-xl font-bold text-emerald-800">{formatNumber(whatsappImpressions)}</p>
+            </div>
+            <div className="p-3 bg-white/60 rounded-lg">
+              <p className="text-xs text-emerald-600 uppercase">CTR</p>
+              <p className="text-xl font-bold text-emerald-800">{whatsappCTR.toFixed(2)}%</p>
+            </div>
+            <div className="p-3 bg-white/60 rounded-lg">
+              <p className="text-xs text-emerald-600 uppercase">CPC</p>
+              <p className="text-xl font-bold text-emerald-800">{formatCurrency(whatsappCPC)}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Batches Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

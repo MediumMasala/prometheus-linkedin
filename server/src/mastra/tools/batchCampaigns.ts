@@ -34,6 +34,14 @@ const VARIANT_PATTERNS: { pattern: RegExp; type: VariantType }[] = [
   { pattern: /\bgeo\b|bangalore|bengaluru|delhi|mumbai|hyderabad|chennai/i, type: 'geo' },
 ];
 
+/**
+ * Check if a campaign is a WhatsApp acquisition campaign
+ * These are special campaigns targeting top engineers via WhatsApp groups
+ */
+function isWhatsAppCampaign(campaignName: string): boolean {
+  return /whatsapp/i.test(campaignName);
+}
+
 function detectVariant(campaignName: string): VariantType {
   for (const { pattern, type } of VARIANT_PATTERNS) {
     if (pattern.test(campaignName)) {
@@ -252,6 +260,7 @@ export const batchCampaignsTool = createTool({
   outputSchema: z.object({
     batches: z.array(z.any()),
     ungrouped: z.array(z.any()),
+    whatsappCampaigns: z.array(z.any()).optional(), // WhatsApp acquisition campaigns (separate category)
     parsingWarnings: z.array(
       z.object({
         campaignId: z.string(),
@@ -265,6 +274,8 @@ export const batchCampaignsTool = createTool({
       totalRoles: z.number(),
       matchedCampaigns: z.number(),
       unmatchedCampaigns: z.number(),
+      whatsappCampaigns: z.number().optional(), // Count of WhatsApp campaigns
+      whatsappSpend: z.number().optional(),     // Total spend on WhatsApp campaigns
     }),
     totalBatches: z.number(),
   }),
@@ -273,9 +284,25 @@ export const batchCampaignsTool = createTool({
 
     console.log(`[Tool: batchCampaigns] Processing ${campaigns.length} campaigns with ${internalRoles.length} internal roles as context`);
 
+    // STEP 0: Separate WhatsApp campaigns from regular campaigns
+    // WhatsApp campaigns are a special acquisition channel and tracked separately
+    const whatsappCampaigns: typeof campaigns = [];
+    const regularCampaigns: typeof campaigns = [];
+
+    for (const campaign of campaigns) {
+      if (isWhatsAppCampaign(campaign.name)) {
+        whatsappCampaigns.push(campaign);
+      } else {
+        regularCampaigns.push(campaign);
+      }
+    }
+
+    const whatsappSpend = whatsappCampaigns.reduce((sum, c) => sum + c.spend, 0);
+    console.log(`[Tool: batchCampaigns] Found ${whatsappCampaigns.length} WhatsApp campaigns (₹${whatsappSpend.toFixed(0)} spend)`);
+
     // Create lookup map for campaign metrics
     const campaignDataMap = new Map(
-      campaigns.map((c) => [c.campaignId, c])
+      regularCampaigns.map((c) => [c.campaignId, c])
     );
 
     // Create a map of internal roles for quick lookup
@@ -285,11 +312,11 @@ export const batchCampaignsTool = createTool({
       roleMap.set(key, role);
     }
 
-    // STEP 1: Check saved batching rules first
+    // STEP 1: Check saved batching rules first (only for regular campaigns, not WhatsApp)
     const savedBatchResults = new Map<string, { company: string; role: string; batchId: string }>();
     const campaignsNeedingAI: { campaignId: string; name: string }[] = [];
 
-    for (const campaign of campaigns) {
+    for (const campaign of regularCampaigns) {
       const savedBatch = getBatchForCampaign(campaign.name);
       if (savedBatch) {
         savedBatchResults.set(campaign.campaignId, savedBatch);
@@ -346,7 +373,7 @@ export const batchCampaignsTool = createTool({
     // Create a map of AI results
     const aiResultMap = new Map(aiResults.map((r) => [r.campaignId, r]));
 
-    for (const campaign of campaigns) {
+    for (const campaign of regularCampaigns) {
       const savedBatch = savedBatchResults.get(campaign.campaignId);
       const aiResult = aiResultMap.get(campaign.campaignId);
       const variantType = detectVariant(campaign.name);
@@ -417,17 +444,20 @@ export const batchCampaignsTool = createTool({
     const stats = {
       totalCampaigns: campaigns.length,
       totalRoles: batches.length,
-      matchedCampaigns: campaigns.length - ungrouped.length,
+      matchedCampaigns: regularCampaigns.length - ungrouped.length,
       unmatchedCampaigns: ungrouped.length,
+      whatsappCampaigns: whatsappCampaigns.length,
+      whatsappSpend,
     };
 
     console.log(
-      `[Tool: batchCampaigns] Created ${batches.length} role batches, ${ungrouped.length} ungrouped campaigns`
+      `[Tool: batchCampaigns] Created ${batches.length} role batches, ${ungrouped.length} ungrouped, ${whatsappCampaigns.length} WhatsApp campaigns`
     );
 
     return {
       batches,
       ungrouped,
+      whatsappCampaigns, // Separate WhatsApp campaigns for special tracking
       parsingWarnings,
       stats,
       totalBatches: batches.length,

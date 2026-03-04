@@ -5,11 +5,37 @@ import { batchCampaignsTool } from './tools/batchCampaigns.js';
 import { fetchInternalDataTool } from './tools/fetchInternalData.js';
 import { mapAndReconcileTool } from './tools/mapAndReconcile.js';
 
-// Export tools for direct use
+// Video pipeline tools
+import {
+  characterContextTool,
+  characterProfileTool,
+  topicGeneratorTool,
+  researchGeneratorTool,
+  scriptGeneratorTool,
+  ttsGeneratorTool,
+  scenePlannerTool,
+  videoPipelineTools,
+  videoPipelineToolsArray,
+} from './tools/video-pipeline/index.js';
+
+// Export Prometheus tools for direct use
 export { fetchLinkedInCampaignsTool };
 export { batchCampaignsTool };
 export { fetchInternalDataTool };
 export { mapAndReconcileTool };
+
+// Export Video Pipeline tools
+export {
+  characterContextTool,
+  characterProfileTool,
+  topicGeneratorTool,
+  researchGeneratorTool,
+  scriptGeneratorTool,
+  ttsGeneratorTool,
+  scenePlannerTool,
+  videoPipelineTools,
+  videoPipelineToolsArray,
+};
 
 // Export the agent
 export { prometheusAgent } from './agents/prometheus.js';
@@ -65,6 +91,10 @@ export async function runPrometheusAnalysis(config: {
   });
 
   console.log(`[Prometheus] Created ${batchResult.batches.length} batches`);
+  const whatsappCampaigns = batchResult.whatsappCampaigns || [];
+  if (whatsappCampaigns.length > 0) {
+    console.log(`[Prometheus] Found ${whatsappCampaigns.length} WhatsApp campaigns (₹${batchResult.stats.whatsappSpend?.toFixed(0) || 0} spend)`);
+  }
 
   // Step 4: Map and reconcile
   console.log('[Prometheus] Step 4: Mapping and reconciling...');
@@ -73,6 +103,7 @@ export async function runPrometheusAnalysis(config: {
       batches: batchResult.batches,
       internalRoles: internalResult.roles,
       ungroupedCampaigns: batchResult.ungrouped,
+      whatsappCampaigns, // WhatsApp acquisition campaigns
     },
   });
 
@@ -89,6 +120,10 @@ export async function runPrometheusAnalysis(config: {
       batches: batchResult.batches,
       ungrouped: batchResult.ungrouped,
       totalBatches: batchResult.totalBatches,
+      whatsappCampaigns: batchResult.whatsappCampaigns || [],
+      stats: {
+        whatsappSpend: batchResult.stats?.whatsappSpend || 0,
+      },
     },
     internal: {
       roles: internalResult.roles,

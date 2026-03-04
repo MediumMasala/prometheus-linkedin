@@ -5,13 +5,17 @@ export interface CampaignDailySnapshot {
   campaignName: string;
   company: string;
   role: string;
-  spendToday: number;       // in INR
-  resumesToday: number;
-  costPerResume: number;    // spendToday / resumesToday (Infinity if zero resumes)
-  timestamp: string;        // ISO timestamp
-  hourOfDay: number;        // 0-23
-  dayOfWeek: number;        // 0 = Sunday, 6 = Saturday
+  status?: 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | 'DRAFT' | 'CANCELED';
+  spendToday: number;         // Total spend in INR
+  liveSpendToday?: number;    // Spend from ACTIVE campaigns only
+  resumesToday: number;       // Total resumes
+  paidResumesToday?: number;  // Resumes from paid campaigns only
+  costPerResume: number;      // liveSpendToday / paidResumesToday (correct CPR)
+  timestamp: string;          // ISO timestamp
+  hourOfDay: number;          // 0-23
+  dayOfWeek: number;          // 0 = Sunday, 6 = Saturday
   isWeekend: boolean;
+  isLive?: boolean;           // Whether role is currently live
 }
 
 export interface BreachedCampaign extends CampaignDailySnapshot {

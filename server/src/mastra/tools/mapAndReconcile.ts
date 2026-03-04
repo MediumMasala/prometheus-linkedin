@@ -158,15 +158,24 @@ export const mapAndReconcileTool = createTool({
         jobTitle: z.string(),
         companyName: z.string(),
         resumes: z.number(),
+        paidResumes: z.number().optional(),      // Resumes from paid campaigns
+        organicResumes: z.number().optional(),   // Resumes from organic sources
         source: z.string().optional(),
+        isLive: z.boolean().optional(),          // Whether role is currently live
       })
     ),
     ungroupedCampaigns: z.array(z.any()).optional(),
+    whatsappCampaigns: z.array(z.any()).optional(), // WhatsApp acquisition campaigns
   }),
   outputSchema: z.object({
     matchedCampaigns: z.array(z.any()),
     unmatchedLinkedIn: z.array(z.any()),
     unmatchedInternal: z.array(z.any()),
+    whatsapp: z.object({                           // WhatsApp acquisition metrics
+      campaigns: z.array(z.any()),
+      totalSpend: z.number(),
+      campaignCount: z.number(),
+    }).optional(),
     other: z.object({
       linkedInSpend: z.number(),
       linkedInClicks: z.number(),
@@ -174,9 +183,15 @@ export const mapAndReconcileTool = createTool({
     }),
     summary: z.object({
       totalSpend: z.number(),
+      totalLiveSpend: z.number().optional(),     // Spend from ACTIVE campaigns only (for transparency)
+      matchedTotalSpend: z.number().optional(),  // Total spend from matched campaigns (used for CPR)
+      whatsappSpend: z.number().optional(),      // Spend on WhatsApp acquisition campaigns
       totalResumes: z.number(),
+      totalPaidResumes: z.number().optional(),   // Paid resumes only
       matchedResumes: z.number(),
+      matchedPaidResumes: z.number().optional(), // Matched paid resumes
       unmatchedResumes: z.number(),
+      // CPR = matchedTotalSpend / matchedPaidResumes (includes ACTIVE + PAUSED spend)
       overallCostPerResume: z.number(),
       bestPerformingBatch: z.string().nullable(),
       worstPerformingBatch: z.string().nullable(),
@@ -184,11 +199,15 @@ export const mapAndReconcileTool = createTool({
     }),
   }),
   execute: async ({ context }) => {
-    const { batches, internalRoles, ungroupedCampaigns = [] } = context;
+    const { batches, internalRoles, ungroupedCampaigns = [], whatsappCampaigns = [] } = context;
 
     console.log(
       `[Tool: mapAndReconcile] Matching ${batches.length} batches with ${internalRoles.length} internal roles`
     );
+
+    // Calculate WhatsApp metrics
+    const whatsappSpend = whatsappCampaigns.reduce((sum: number, c: any) => sum + (c.spend || 0), 0);
+    console.log(`[Tool: mapAndReconcile] WhatsApp: ${whatsappCampaigns.length} campaigns, ₹${whatsappSpend.toFixed(0)} spend`);
 
     // Create a map for quick role lookup
     const roleMap = new Map<string, InternalRole>();
@@ -227,10 +246,26 @@ export const mapAndReconcileTool = createTool({
       const role = roleMap.get(match.internalRoleKey);
 
       if (batch && role && !matchedBatchIds.has(batch.batchId) && !matchedRoleKeys.has(match.internalRoleKey)) {
-        const costPerResume = role.resumes > 0 ? batch.aggregatedMetrics.totalSpend / role.resumes : 0;
+        // Use TOTAL spend for CPR (includes both ACTIVE and PAUSED campaigns)
+        // because paused campaigns still contributed to resume generation
+        const totalBatchSpend = batch.aggregatedMetrics.totalSpend;
+
+        // Also track live spend separately for transparency
+        const activeCampaigns = batch.campaigns.filter((c: any) => c.status === 'ACTIVE');
+        const liveSpend = activeCampaigns.reduce((sum: number, c: any) => sum + (c.metrics?.spend || 0), 0);
+
+        // Use paid resumes if available, otherwise fall back to total resumes
+        const paidResumes = role.paidResumes ?? role.resumes;
+        const isRoleLive = role.isLive !== false; // Default to true if not specified
+
+        // CPR = Total Spend / Paid Resumes (correct formula - includes all spend)
+        const costPerResume = (isRoleLive && paidResumes > 0)
+          ? totalBatchSpend / paidResumes
+          : 0;
+
         const clickToResumeRate =
           batch.aggregatedMetrics.totalLandingPageClicks > 0
-            ? (role.resumes / batch.aggregatedMetrics.totalLandingPageClicks) * 100
+            ? (paidResumes / batch.aggregatedMetrics.totalLandingPageClicks) * 100
             : 0;
 
         matchedCampaigns.push({
@@ -241,6 +276,7 @@ export const mapAndReconcileTool = createTool({
             role: batch.role,
             campaigns: batch.campaigns,
             totalSpend: batch.aggregatedMetrics.totalSpend,
+            liveSpend, // Add live spend for transparency
             totalImpressions: batch.aggregatedMetrics.totalImpressions,
             totalClicks: batch.aggregatedMetrics.totalClicks,
             totalLandingPageClicks: batch.aggregatedMetrics.totalLandingPageClicks,
@@ -249,6 +285,9 @@ export const mapAndReconcileTool = createTool({
             roleName: role.jobTitle,
             companyName: role.companyName,
             resumes: role.resumes,
+            paidResumes,
+            organicResumes: role.organicResumes ?? 0,
+            isLive: isRoleLive,
           },
           combined: {
             costPerResume,
@@ -273,11 +312,25 @@ export const mapAndReconcileTool = createTool({
       if (fallback) {
         const roleKey = `${fallback.role.jobTitle}|${fallback.role.companyName}`;
         if (!matchedRoleKeys.has(roleKey)) {
-          const costPerResume =
-            fallback.role.resumes > 0 ? batch.aggregatedMetrics.totalSpend / fallback.role.resumes : 0;
+          // Use TOTAL spend for CPR (includes both ACTIVE and PAUSED campaigns)
+          const totalBatchSpend = batch.aggregatedMetrics.totalSpend;
+
+          // Also track live spend separately for transparency
+          const activeCampaigns = batch.campaigns.filter((c: any) => c.status === 'ACTIVE');
+          const liveSpend = activeCampaigns.reduce((sum: number, c: any) => sum + (c.metrics?.spend || 0), 0);
+
+          // Use paid resumes if available, otherwise fall back to total resumes
+          const paidResumes = fallback.role.paidResumes ?? fallback.role.resumes;
+          const isRoleLive = fallback.role.isLive !== false;
+
+          // CPR = Total Spend / Paid Resumes (correct formula - includes all spend)
+          const costPerResume = (isRoleLive && paidResumes > 0)
+            ? totalBatchSpend / paidResumes
+            : 0;
+
           const clickToResumeRate =
             batch.aggregatedMetrics.totalLandingPageClicks > 0
-              ? (fallback.role.resumes / batch.aggregatedMetrics.totalLandingPageClicks) * 100
+              ? (paidResumes / batch.aggregatedMetrics.totalLandingPageClicks) * 100
               : 0;
 
           matchedCampaigns.push({
@@ -288,6 +341,7 @@ export const mapAndReconcileTool = createTool({
               role: batch.role,
               campaigns: batch.campaigns,
               totalSpend: batch.aggregatedMetrics.totalSpend,
+              liveSpend,
               totalImpressions: batch.aggregatedMetrics.totalImpressions,
               totalClicks: batch.aggregatedMetrics.totalClicks,
               totalLandingPageClicks: batch.aggregatedMetrics.totalLandingPageClicks,
@@ -296,6 +350,9 @@ export const mapAndReconcileTool = createTool({
               roleName: fallback.role.jobTitle,
               companyName: fallback.role.companyName,
               resumes: fallback.role.resumes,
+              paidResumes,
+              organicResumes: fallback.role.organicResumes ?? 0,
+              isLive: isRoleLive,
             },
             combined: {
               costPerResume,
@@ -328,15 +385,29 @@ export const mapAndReconcileTool = createTool({
 
     const organicResumes = unmatchedInternal.reduce((sum, r) => sum + r.resumes, 0);
 
-    // Calculate summary
+    // Calculate summary using TOTAL spend (not just live spend) and PAID resumes
     const totalSpend = batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0);
+
+    // Calculate live spend (from ACTIVE campaigns only) - for transparency
+    const totalLiveSpend = matchedCampaigns.reduce((sum, m) => sum + ((m.linkedin as any).liveSpend || 0), 0);
+
+    // Calculate matched total spend (for CPR calculation - includes PAUSED campaigns)
+    const matchedTotalSpend = matchedCampaigns.reduce((sum, m) => sum + (m.linkedin.totalSpend || 0), 0);
+
+    // Total resumes (all)
     const totalResumes = internalRoles.reduce((sum, r) => sum + r.resumes, 0);
+
+    // Paid resumes only (for CPR calculation)
+    const totalPaidResumes = internalRoles.reduce((sum, r) => sum + (r.paidResumes ?? r.resumes), 0);
+    const matchedPaidResumes = matchedCampaigns.reduce((sum, m) => sum + ((m.internal as any).paidResumes || m.internal.resumes), 0);
+
+    // For backward compatibility
     const matchedResumes = matchedCampaigns.reduce((sum, m) => sum + m.internal.resumes, 0);
     const unmatchedResumes = totalResumes - matchedResumes;
 
-    // Find best/worst performing batches
+    // Find best/worst performing batches (only consider roles with paid resumes)
     const performingBatches = matchedCampaigns
-      .filter((m) => m.internal.resumes > 0)
+      .filter((m) => ((m.internal as any).paidResumes || m.internal.resumes) > 0 && m.combined.costPerResume > 0)
       .sort((a, b) => a.combined.costPerResume - b.combined.costPerResume);
 
     const bestPerforming = performingBatches[0]?.linkedin.batchName || null;
@@ -345,7 +416,9 @@ export const mapAndReconcileTool = createTool({
 
     // Generate recommendations
     const recommendations: string[] = [];
-    const avgCostPerResume = matchedResumes > 0 ? totalSpend / matchedResumes : 0;
+
+    // CPR = Total Spend / Paid Resumes (correct formula - includes all spend, not just live)
+    const avgCostPerResume = matchedPaidResumes > 0 ? matchedTotalSpend / matchedPaidResumes : 0;
 
     if (avgCostPerResume > 300) {
       recommendations.push(
@@ -376,6 +449,11 @@ export const mapAndReconcileTool = createTool({
       matchedCampaigns,
       unmatchedLinkedIn,
       unmatchedInternal,
+      whatsapp: {
+        campaigns: whatsappCampaigns,
+        totalSpend: whatsappSpend,
+        campaignCount: whatsappCampaigns.length,
+      },
       other: {
         linkedInSpend: otherLinkedInSpend,
         linkedInClicks: otherLinkedInClicks,
@@ -383,10 +461,16 @@ export const mapAndReconcileTool = createTool({
       },
       summary: {
         totalSpend,
+        totalLiveSpend, // Spend from ACTIVE campaigns only (for transparency)
+        matchedTotalSpend, // Total spend from matched campaigns (used for CPR)
+        whatsappSpend,    // Spend on WhatsApp acquisition campaigns
         totalResumes,
+        totalPaidResumes, // Resumes from paid campaigns
         matchedResumes,
+        matchedPaidResumes,
         unmatchedResumes,
-        overallCostPerResume: totalResumes > 0 ? totalSpend / totalResumes : 0,
+        // CPR = Total Spend / Paid Resumes (correct formula - includes ACTIVE + PAUSED)
+        overallCostPerResume: matchedPaidResumes > 0 ? matchedTotalSpend / matchedPaidResumes : 0,
         bestPerformingBatch: bestPerforming,
         worstPerformingBatch: worstPerforming,
         recommendations,

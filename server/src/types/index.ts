@@ -131,8 +131,11 @@ export interface BatchedCampaignsOutput {
 export interface InternalRole {
   jobTitle: string;
   companyName: string;
-  resumes: number;
+  resumes: number;           // Total resumes (paid + organic) - for backward compatibility
+  paidResumes?: number;      // Resumes from paid campaigns (LinkedIn ads)
+  organicResumes?: number;   // Resumes from organic sources (direct applications, referrals)
   source?: string;
+  isLive?: boolean;          // Whether the role is currently live/active
 }
 
 export interface InternalDataInput {
@@ -153,6 +156,7 @@ export interface MatchedCampaign {
     role: string;
     campaigns: CampaignVariant[];
     totalSpend: number;
+    liveSpend?: number;        // Spend from ACTIVE campaigns only
     totalImpressions: number;
     totalClicks: number;
     totalLandingPageClicks: number;
@@ -160,10 +164,13 @@ export interface MatchedCampaign {
   internal: {
     roleName: string;
     companyName: string;
-    resumes: number;
+    resumes: number;           // Total resumes (for backward compatibility)
+    paidResumes?: number;      // Resumes from paid campaigns
+    organicResumes?: number;   // Resumes from organic sources
+    isLive?: boolean;          // Whether the role is currently live
   };
   combined: {
-    costPerResume: number;
+    costPerResume: number;     // liveSpend / paidResumes
     clickToResumeRate: number;
   };
 }
@@ -178,13 +185,32 @@ export interface UnifiedReport {
     organicResumes: number;
   };
   summary: {
-    totalSpend: number;
+    // Total spend breakdown
+    totalSpend: number;                  // Total LinkedIn spend (resume + whatsapp)
+    totalLiveSpend?: number;             // Spend from ACTIVE campaigns only (for transparency)
+    matchedTotalSpend?: number;          // Spend on resume acquisition campaigns (used for CPR)
+    whatsappSpend?: number;              // Spend on WhatsApp acquisition campaigns (separate tracking)
+
+    // Resume metrics
     totalResumes: number;
+    totalPaidResumes?: number;           // Paid resumes only
     matchedResumes: number;
+    matchedPaidResumes?: number;         // Matched paid resumes
     unmatchedResumes: number;
+
+    // CPR = matchedTotalSpend / matchedPaidResumes (excludes WhatsApp spend)
     overallCostPerResume: number;
+
+    // Performance
     bestPerformingBatch: string | null;
     worstPerformingBatch: string | null;
     recommendations: string[];
+  };
+
+  // WhatsApp acquisition (separate category)
+  whatsapp?: {
+    campaigns: any[];
+    totalSpend: number;
+    campaignCount: number;
   };
 }
