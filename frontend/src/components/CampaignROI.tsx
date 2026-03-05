@@ -196,13 +196,6 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat('en-IN').format(value);
 }
 
-function formatDurationMinutes(seconds: number): string {
-  if (!seconds || seconds === 0) return '—';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 1) return '<1 min';
-  return `${minutes} min`;
-}
-
 interface CampaignROIProps {
   fetchApplications: (date?: string) => Promise<JobApplication[]>;
 }
