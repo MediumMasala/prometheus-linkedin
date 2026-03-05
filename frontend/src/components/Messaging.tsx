@@ -22,6 +22,9 @@ interface InternalRole {
   tier1Count?: number;
   supremeCount?: number;
   nonTier1Count?: number;
+  interviewCount?: number;
+  totalInterviewDuration?: number;
+  avgInterviewDuration?: number;
 }
 
 interface CampaignBatch {
@@ -50,8 +53,11 @@ interface CompanyData {
     metrics: CampaignMetrics;
     matchedResumes: number;
     matchedRole: InternalRole | null;
+    interviewMinutes: number;
   }[];
   totalImpressions: number;
+  totalInterviewMinutes: number;
+  totalResumes: number;
 }
 
 interface GeneratedMessage {
@@ -63,8 +69,11 @@ interface GeneratedMessage {
     supremeCount: number;
     nonTier1Count: number;
     landingPageClicks: number;
+    interviewMinutes: number;
   };
 }
+
+type MessageType = 'company' | 'role';
 
 // Company aliases - same as CampaignROI
 const COMPANY_ALIASES: Record<string, string[]> = {
@@ -87,6 +96,20 @@ function formatNumber(value: number): string {
     return (value / 1000).toFixed(1) + 'K';
   }
   return new Intl.NumberFormat('en-IN').format(value);
+}
+
+// Top Indian startups for candidate companies
+const TOP_INDIAN_STARTUPS = [
+  'Razorpay', 'Zerodha', 'CRED', 'PhonePe', 'Swiggy', 'Zomato', 'Flipkart',
+  'Meesho', 'Groww', 'Slice', 'Jupiter', 'Dream11', 'ShareChat',
+  'Unacademy', 'upGrad', 'Freshworks', 'Chargebee', 'Postman', 'BrowserStack',
+  'Ola', 'Paytm', 'Myntra', 'Nykaa', 'Lenskart', 'Urban Company', 'Dunzo',
+  'Curefit', 'Spinny', 'Cars24', 'OYO', 'Byju\'s', 'PharmEasy', 'Licious'
+];
+
+function getRandomCompanies(count: number = 3): string {
+  const shuffled = [...TOP_INDIAN_STARTUPS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count).join(', ');
 }
 
 // Check if two company names match (including aliases) - same as CampaignROI
@@ -184,6 +207,7 @@ export function Messaging() {
   const [companies, setCompanies] = useState<CompanyData[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [selectedRole, setSelectedRole] = useState<string>('');
+  const [messageType, setMessageType] = useState<MessageType>('role');
   const [generatedMessage, setGeneratedMessage] = useState<GeneratedMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -191,6 +215,11 @@ export function Messaging() {
   // Date range state (default to last 3 days)
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+
+  // Calculate days from date range
+  const daysSinceLive = startDate && endDate
+    ? Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1
+    : 1;
 
   // Initialize date range on mount
   useEffect(() => {
@@ -234,6 +263,9 @@ export function Messaging() {
         tier1Count: r.tier1Count || 0,
         supremeCount: r.supremeCount || 0,
         nonTier1Count: r.nonTier1Count || 0,
+        interviewCount: r.interviewCount || 0,
+        totalInterviewDuration: r.totalInterviewDuration || 0,
+        avgInterviewDuration: r.avgInterviewDuration || 0,
       }));
 
       // Group by company and match with internal roles
@@ -242,6 +274,9 @@ export function Messaging() {
       batches.forEach((batch) => {
         const matchedRole = matchBatchToRole(batch, internalRoles);
         const existing = companyMap.get(batch.company);
+        const interviewMinutes = matchedRole?.totalInterviewDuration
+          ? Math.round(matchedRole.totalInterviewDuration / 60)
+          : 0;
 
         const roleData = {
           role: batch.role,
@@ -256,16 +291,21 @@ export function Messaging() {
           },
           matchedResumes: matchedRole?.resumes || 0,
           matchedRole,
+          interviewMinutes,
         };
 
         if (existing) {
           existing.roles.push(roleData);
           existing.totalImpressions += batch.aggregatedMetrics.totalImpressions;
+          existing.totalInterviewMinutes += interviewMinutes;
+          existing.totalResumes += matchedRole?.resumes || 0;
         } else {
           companyMap.set(batch.company, {
             company: batch.company,
             roles: [roleData],
             totalImpressions: batch.aggregatedMetrics.totalImpressions,
+            totalInterviewMinutes: interviewMinutes,
+            totalResumes: matchedRole?.resumes || 0,
           });
         }
       });
@@ -297,131 +337,131 @@ export function Messaging() {
 
   // Generate message when role is selected
   const handleGenerateMessage = async () => {
-    if (!selectedCompany || !selectedRole || !selectedRoleData) return;
+    if (!selectedCompany) return;
+    if (messageType === 'role' && (!selectedRole || !selectedRoleData)) return;
 
     setIsGenerating(true);
     setError(null);
 
     try {
-      // Use the matched resume data from Campaign ROI
-      const matchedRole = selectedRoleData.matchedRole;
+      const companyData = companies.find(c => c.company === selectedCompany);
 
-      const metrics = {
-        impressions: selectedRoleData.metrics.impressions,
-        totalResumes: selectedRoleData.matchedResumes,
-        tier1Count: matchedRole?.tier1Count || 0,
-        supremeCount: matchedRole?.supremeCount || 0,
-        nonTier1Count: matchedRole?.nonTier1Count || 0,
-        landingPageClicks: selectedRoleData.metrics.landingPageClicks,
-      };
+      if (messageType === 'company' && companyData) {
+        // Company-level metrics (aggregate)
+        const totalLPClicks = companyData.roles.reduce((sum, r) => sum + r.metrics.landingPageClicks, 0);
+        const metrics = {
+          impressions: companyData.totalImpressions,
+          totalResumes: companyData.totalResumes,
+          tier1Count: 0,
+          supremeCount: 0,
+          nonTier1Count: 0,
+          landingPageClicks: totalLPClicks,
+          interviewMinutes: companyData.totalInterviewMinutes,
+        };
 
-      // Generate message using Gemini via backend
-      const response = await authFetch('/api/messaging/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company: selectedCompany,
-          role: selectedRole,
-          metrics,
-          dateRange: { startDate, endDate },
-        }),
-      });
+        const message = generateRound1Message(messageType, selectedCompany, '', metrics, companyData);
+        setGeneratedMessage({ message, metrics });
+      } else if (selectedRoleData) {
+        // Role-level metrics
+        const matchedRole = selectedRoleData.matchedRole;
+        const metrics = {
+          impressions: selectedRoleData.metrics.impressions,
+          totalResumes: selectedRoleData.matchedResumes,
+          tier1Count: matchedRole?.tier1Count || 0,
+          supremeCount: matchedRole?.supremeCount || 0,
+          nonTier1Count: matchedRole?.nonTier1Count || 0,
+          landingPageClicks: selectedRoleData.metrics.landingPageClicks,
+          interviewMinutes: selectedRoleData.interviewMinutes,
+        };
 
-      if (response.ok) {
-        const data = await response.json();
-        setGeneratedMessage({ message: data.message, metrics });
-      } else {
-        // Fallback: generate message client-side
-        const message = generateFallbackMessage(selectedCompany, selectedRole, metrics);
+        const message = generateRound1Message(messageType, selectedCompany, selectedRole, metrics);
         setGeneratedMessage({ message, metrics });
       }
     } catch (err) {
       console.error('Error generating message:', err);
-      // Fallback
-      const metrics = {
-        impressions: selectedRoleData.metrics.impressions,
-        totalResumes: selectedRoleData.matchedResumes,
-        tier1Count: 0,
-        supremeCount: 0,
-        nonTier1Count: 0,
-        landingPageClicks: selectedRoleData.metrics.landingPageClicks,
-      };
-      const message = generateFallbackMessage(selectedCompany, selectedRole, metrics);
-      setGeneratedMessage({ message, metrics });
+      setError('Failed to generate message');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Auto-generate when role is selected
+  // Auto-generate when role is selected or message type changes
   useEffect(() => {
-    if (selectedRole && selectedRoleData) {
+    if (messageType === 'company' && selectedCompany) {
+      handleGenerateMessage();
+    } else if (messageType === 'role' && selectedRole && selectedRoleData) {
       handleGenerateMessage();
     }
-  }, [selectedRole]);
+  }, [selectedRole, messageType, startDate, endDate]);
 
-  // Fallback message generator (follows same rules as Gemini prompt)
-  const generateFallbackMessage = (
+  // Generate message following Round1AI format
+  const generateRound1Message = (
+    type: MessageType,
     company: string,
     role: string,
-    metrics: GeneratedMessage['metrics']
+    metrics: GeneratedMessage['metrics'],
+    companyData?: CompanyData
   ): string => {
-    const daysDiff =
-      Math.ceil(
-        (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-      ) + 1;
-
-    // Top Indian startups for credibility
-    const topCompanies = [
-      'Razorpay', 'Zerodha', 'CRED', 'PhonePe', 'Swiggy', 'Zomato', 'Flipkart',
-      'Meesho', 'Groww', 'Slice', 'Jupiter', 'Dream11', 'ShareChat',
-      'Unacademy', 'upGrad', 'Freshworks', 'Chargebee', 'Postman', 'BrowserStack'
-    ];
-    const shuffled = topCompanies.sort(() => 0.5 - Math.random());
-    const selectedCompanies = shuffled.slice(0, 3);
+    const days = daysSinceLive;
+    // Auto-randomize candidate companies each time
+    const companies = getRandomCompanies().split(',').map(c => c.trim());
 
     // Resume text: "a couple of resumes" if < 10, else actual number
-    const resumeText = metrics.totalResumes < 10 ? 'a couple of resumes' : `${metrics.totalResumes} resumes`;
+    const formatResumes = (count: number) => count < 10 ? 'a couple of resumes' : `${count}`;
 
-    const parts: string[] = [];
-    parts.push(`Hi team,\n\nQuick update on your ${role} role at ${company}:`);
-    parts.push(`\n\nBehind the scenes, we've been working to find the right candidates through our outreach channels.`);
+    if (type === 'company' && companyData && companyData.roles.length > 1) {
+      // TYPE 1: Company-level update
+      const lines: string[] = [];
+      lines.push('Updates from Round1AI Team');
+      lines.push('');
+      lines.push(`${company} (${days} day update)`);
+      lines.push('');
+      lines.push(`AI interviews conducted: ${companyData.totalInterviewMinutes} minutes`);
+      lines.push(`Resumes received: ${formatResumes(companyData.totalResumes)}`);
+      lines.push(`Page visits: ${metrics.landingPageClicks}+`);
+      lines.push(`Reach across candidate network: ~${formatNumber(metrics.impressions)}`);
+      lines.push('');
+      lines.push('Role-wise breakdown:');
 
-    // Stats section - lead with resumes, impressions last
-    const statParts: string[] = [];
+      companyData.roles.forEach(r => {
+        const roleResumes = r.matchedResumes < 10 ? 'a couple' : r.matchedResumes;
+        lines.push(`${r.role}: ${roleResumes} resumes, ${r.interviewMinutes} min of AI interviews`);
+      });
 
-    if (metrics.totalResumes > 0) {
-      let resumeLine = `• Received ${resumeText}`;
-      if (metrics.supremeCount > 0 || metrics.tier1Count > 0) {
-        const qualityParts: string[] = [];
-        if (metrics.supremeCount > 0) qualityParts.push(`${metrics.supremeCount} Supreme`);
-        if (metrics.tier1Count > 0) qualityParts.push(`${metrics.tier1Count} Tier-1`);
-        resumeLine += ` (${qualityParts.join(', ')})`;
+      lines.push('');
+      if (companies.length > 0) {
+        lines.push(`Candidates showing interest from: ${companies.join(', ')}`);
+        lines.push('');
       }
-      statParts.push(resumeLine);
+      lines.push('Evaluating resumes. Shortlist coming shortly.');
+      lines.push('');
+      lines.push('Best,');
+      lines.push('Round1AI Team');
+
+      return lines.join('\n');
+    } else {
+      // TYPE 2: Role-level update
+      const lines: string[] = [];
+      lines.push('Updates from Round1AI Team');
+      lines.push('');
+      lines.push(`${role}, ${company} (${days} day update)`);
+      lines.push('');
+      lines.push(`AI interviews conducted: ${metrics.interviewMinutes} minutes`);
+      lines.push(`Resumes received: ${formatResumes(metrics.totalResumes)}`);
+      lines.push(`Page visits: ${metrics.landingPageClicks}+`);
+      lines.push(`Reach across candidate network: ~${formatNumber(metrics.impressions)}`);
+      lines.push('');
+      if (companies.length > 0) {
+        lines.push(`Candidates showing interest from: ${companies.join(', ')}`);
+        lines.push('');
+      }
+      lines.push('Evaluating resumes. Shortlist coming shortly.');
+      lines.push('');
+      lines.push('Best,');
+      lines.push('Round1AI Team');
+
+      return lines.join('\n');
     }
-
-    if (metrics.landingPageClicks > 0) {
-      statParts.push(`• ${metrics.landingPageClicks} candidates visited the landing page`);
-    }
-
-    if (metrics.impressions > 0) {
-      statParts.push(`• ~${formatNumber(metrics.impressions)} impressions across our candidate network`);
-    }
-
-    if (statParts.length > 0) {
-      parts.push(`\n\nIn the last ${daysDiff} day${daysDiff > 1 ? 's' : ''}:\n${statParts.join('\n')}`);
-    }
-
-    // Credibility line with company names
-    parts.push(`\n\nWe're seeing interest from engineers at ${selectedCompanies[0]}, ${selectedCompanies[1]}, and ${selectedCompanies[2]}.`);
-
-    // Evaluation line
-    parts.push(`\n\nOur team is evaluating these profiles and will share shortlisted candidates soon.`);
-
-    parts.push(`\n\nBest,\nTeam Round1`);
-
-    return parts.join('');
   };
 
   // Copy message to clipboard
@@ -516,6 +556,33 @@ export function Messaging() {
       {/* Selection Dropdowns */}
       {!isLoading && companies.length > 0 && (
         <div className="mb-8 bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+          {/* Message Type Toggle */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Message Type</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMessageType('role')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  messageType === 'role'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Role-level Update
+              </button>
+              <button
+                onClick={() => setMessageType('company')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  messageType === 'company'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Company-level Update
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Company Dropdown */}
             <div>
@@ -530,64 +597,101 @@ export function Messaging() {
                 <option value="">Choose a company...</option>
                 {companies.map((company) => (
                   <option key={company.company} value={company.company}>
-                    {company.company} ({formatNumber(company.totalImpressions)} impressions)
+                    {company.company} ({company.roles.length} roles, {formatNumber(company.totalImpressions)} reach)
                   </option>
                 ))}
               </select>
               <p className="mt-2 text-xs text-gray-500">
-                {companies.length} live companies sorted by impressions
+                {companies.length} live companies
               </p>
             </div>
 
-            {/* Role Dropdown */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Role</label>
-              <select
-                value={selectedRole}
-                onChange={(e) => setSelectedRole(e.target.value)}
-                disabled={!selectedCompany}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
-              >
-                <option value="">
-                  {selectedCompany ? 'Choose a role...' : 'Select a company first'}
-                </option>
-                {availableRoles.map((role) => (
-                  <option key={role.batchId} value={role.role}>
-                    {role.role} ({formatNumber(role.metrics.impressions)} imp, {role.matchedResumes}{' '}
-                    resumes)
+            {/* Role Dropdown - only for role-level */}
+            {messageType === 'role' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Role</label>
+                <select
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  disabled={!selectedCompany}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="">
+                    {selectedCompany ? 'Choose a role...' : 'Select a company first'}
                   </option>
-                ))}
-              </select>
-              {selectedCompany && (
-                <p className="mt-2 text-xs text-gray-500">
-                  {availableRoles.length} role{availableRoles.length !== 1 ? 's' : ''} available
-                </p>
-              )}
-            </div>
+                  {availableRoles.map((role) => (
+                    <option key={role.batchId} value={role.role}>
+                      {role.role} ({role.matchedResumes} resumes, {role.interviewMinutes} min)
+                    </option>
+                  ))}
+                </select>
+                {selectedCompany && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    {availableRoles.length} role{availableRoles.length !== 1 ? 's' : ''} available
+                  </p>
+                )}
+              </div>
+            )}
+
           </div>
 
-          {/* Selected Role Preview */}
-          {selectedRoleData && (
+          {/* Selected Preview */}
+          {(messageType === 'company' && selectedCompany) || (messageType === 'role' && selectedRoleData) ? (
             <div className="mt-6 pt-6 border-t border-gray-100">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                   <h4 className="font-semibold text-gray-900">
-                    {selectedCompany} - {selectedRole}
+                    {messageType === 'company'
+                      ? `${selectedCompany} (${availableRoles.length} roles)`
+                      : `${selectedCompany} - ${selectedRole}`}
                   </h4>
                   <p className="text-sm text-gray-500">Campaign metrics for selected period</p>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
-                    {formatNumber(selectedRoleData.metrics.impressions)} impressions
-                  </span>
-                  <span className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full">
-                    {selectedRoleData.matchedResumes} resumes
-                  </span>
-                  <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full">
-                    {selectedRoleData.metrics.landingPageClicks} LP clicks
-                  </span>
+                <div className="flex items-center gap-3 text-sm flex-wrap">
+                  {messageType === 'company' && selectedCompanyData && (
+                    <>
+                      <span className="px-3 py-1 bg-teal-50 text-teal-700 rounded-full">
+                        {selectedCompanyData.totalInterviewMinutes} min AI interviews
+                      </span>
+                      <span className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full">
+                        {selectedCompanyData.totalResumes} resumes
+                      </span>
+                      <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
+                        {formatNumber(selectedCompanyData.totalImpressions)} reach
+                      </span>
+                    </>
+                  )}
+                  {messageType === 'role' && selectedRoleData && (
+                    <>
+                      <span className="px-3 py-1 bg-teal-50 text-teal-700 rounded-full">
+                        {selectedRoleData.interviewMinutes} min AI interviews
+                      </span>
+                      <span className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full">
+                        {selectedRoleData.matchedResumes} resumes
+                      </span>
+                      <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full">
+                        {selectedRoleData.metrics.landingPageClicks} page visits
+                      </span>
+                      <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
+                        {formatNumber(selectedRoleData.metrics.impressions)} reach
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {/* Generate Button */}
+          {selectedCompany && (messageType === 'company' || selectedRole) && (
+            <div className="mt-6">
+              <button
+                onClick={handleGenerateMessage}
+                disabled={isGenerating}
+                className="w-full px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {isGenerating ? 'Generating...' : 'Generate Message'}
+              </button>
             </div>
           )}
         </div>
@@ -684,9 +788,9 @@ export function Messaging() {
           <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
             <div className="flex items-center gap-6 text-sm flex-wrap">
               <div>
-                <span className="text-gray-500">Impressions:</span>{' '}
-                <span className="font-semibold text-gray-900">
-                  {formatNumber(generatedMessage.metrics.impressions)}
+                <span className="text-gray-500">AI Interviews:</span>{' '}
+                <span className="font-semibold text-teal-700">
+                  {generatedMessage.metrics.interviewMinutes} min
                 </span>
               </div>
               <div>
@@ -695,26 +799,16 @@ export function Messaging() {
                   {generatedMessage.metrics.totalResumes}
                 </span>
               </div>
-              {generatedMessage.metrics.supremeCount > 0 && (
-                <div>
-                  <span className="text-gray-500">Supreme:</span>{' '}
-                  <span className="font-semibold text-purple-700">
-                    {generatedMessage.metrics.supremeCount}
-                  </span>
-                </div>
-              )}
-              {generatedMessage.metrics.tier1Count > 0 && (
-                <div>
-                  <span className="text-gray-500">Tier-1:</span>{' '}
-                  <span className="font-semibold text-blue-700">
-                    {generatedMessage.metrics.tier1Count}
-                  </span>
-                </div>
-              )}
               <div>
-                <span className="text-gray-500">LP Clicks:</span>{' '}
+                <span className="text-gray-500">Page Visits:</span>{' '}
                 <span className="font-semibold text-gray-900">
                   {generatedMessage.metrics.landingPageClicks}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Reach:</span>{' '}
+                <span className="font-semibold text-gray-900">
+                  {formatNumber(generatedMessage.metrics.impressions)}
                 </span>
               </div>
             </div>

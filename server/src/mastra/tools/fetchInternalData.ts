@@ -31,10 +31,15 @@ export const fetchInternalDataTool = createTool({
         companyName: z.string(),
         resumes: z.number(),
         source: z.string().optional(),
+        interviewCount: z.number().optional(),
+        totalInterviewDuration: z.number().optional(),
+        avgInterviewDuration: z.number().optional(),
       })
     ),
     totalRoles: z.number(),
     totalResumes: z.number(),
+    totalInterviews: z.number().optional(),
+    totalInterviewDuration: z.number().optional(),
     dateRange: z
       .object({
         start: z.string(),
@@ -56,15 +61,19 @@ export const fetchInternalDataTool = createTool({
     });
 
     const totalResumes = roles.reduce((sum: number, r: InternalRole) => sum + r.resumes, 0);
+    const totalInterviews = roles.reduce((sum: number, r: InternalRole) => sum + (r.interviewCount || 0), 0);
+    const totalInterviewDuration = roles.reduce((sum: number, r: InternalRole) => sum + (r.totalInterviewDuration || 0), 0);
 
     console.log(
-      `[Tool: fetchInternalData] Found ${roles.length} roles with ${totalResumes} total resumes`
+      `[Tool: fetchInternalData] Found ${roles.length} roles with ${totalResumes} total resumes, ${totalInterviews} interviews`
     );
 
     return {
       roles,
       totalRoles: roles.length,
       totalResumes,
+      totalInterviews,
+      totalInterviewDuration,
       dateRange,
     };
   },

@@ -23,6 +23,13 @@ export async function fetchInternalData(input: InternalDataInput): Promise<Inter
         const existing = roleMap.get(key);
         if (existing) {
           existing.resumes += item.resumes;
+          // Aggregate interview metrics
+          existing.interviewCount = (existing.interviewCount || 0) + (item.interviewCount || 0);
+          existing.totalInterviewDuration = (existing.totalInterviewDuration || 0) + (item.totalInterviewDuration || 0);
+          // Recalculate average
+          if (existing.interviewCount > 0) {
+            existing.avgInterviewDuration = Math.round(existing.totalInterviewDuration / existing.interviewCount);
+          }
         } else {
           roleMap.set(key, { ...item });
         }
@@ -86,10 +93,23 @@ async function fetchForDate(date?: string): Promise<InternalRole[]> {
 
   return data.data
     .filter((item: any) => item.job_title && item.company_name)
-    .map((item: any) => ({
-      jobTitle: item.job_title,
-      companyName: item.company_name,
-      resumes: item.count || 0,
-      source: 'linkedin', // Assuming all are from LinkedIn for now
-    }));
+    .map((item: any) => {
+      // Parse interview data
+      const interviewData = item.interview_data || [];
+      const validInterviews = interviewData.filter((i: any) => i.interview_duration > 0);
+      const totalDuration = validInterviews.reduce((sum: number, i: any) => sum + (i.interview_duration || 0), 0);
+      const interviewCount = validInterviews.length;
+      const avgDuration = interviewCount > 0 ? totalDuration / interviewCount : 0;
+
+      return {
+        jobTitle: item.job_title,
+        companyName: item.company_name,
+        resumes: item.count || 0,
+        source: 'linkedin',
+        // Interview metrics
+        interviewCount,
+        totalInterviewDuration: totalDuration,
+        avgInterviewDuration: Math.round(avgDuration),
+      };
+    });
 }

@@ -145,6 +145,17 @@ COMPANY ALIASES (these are the SAME company):
 - Zoop = ZOOP
 - Seekho = SEEKHO
 
+IMPORTANT: Use EXACT role names from internal roles list (including company prefix if present).
+This makes debugging easier and ensures accurate mapping.
+
+SPECIAL ROLE MAPPINGS (use exact backend names):
+- Zilo campaigns → use "Zilo Backend Engineer" (exact backend name)
+  Example: "Zilo Backend Engineer - skill TG mumbai" → Zilo|Zilo Backend Engineer
+  Example: "Zilo - SM - Company TG" → Zilo|Zilo Backend Engineer
+
+- Zoop campaigns → use "Zoop Founder's Office" (exact backend name)
+  Example: "Zoop - Founders office - Open TG Grapevine.in" → Zoop|Zoop Founder's Office
+
 CRITICAL RULES:
 1. NEVER prefix role names with company name
    - WRONG: "Sarvam Machine Learning Engineer"

@@ -106,6 +106,8 @@ export async function runPrometheusAnalysis(config: {
       roles: internalResult.roles,
       totalRoles: internalResult.totalRoles,
       totalResumes: internalResult.totalResumes,
+      totalInterviews: internalResult.totalInterviews,
+      totalInterviewDuration: internalResult.totalInterviewDuration,
     },
     report,
   };

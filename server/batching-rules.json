@@ -21,10 +21,11 @@
     },
     "Sarvam - AI Backend - Company TG": {
       "company": "Sarvam",
-      "role": "Backend AI Engineer",
-      "batchId": "sarvam-backend-ai-engineer",
-      "source": "ai",
-      "createdAt": "2026-03-01T07:32:05.586Z"
+      "role": "Sarvam Backend AI Engineer",
+      "batchId": "sarvam-sarvam-backend-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.476192Z"
     },
     "Shaadi - Stealth- VP Engineering": {
       "company": "Stealth",
@@ -35,17 +36,19 @@
     },
     "Sarvam - ML Eng - pedigree": {
       "company": "Sarvam",
-      "role": "Machine Learning Engineer",
-      "batchId": "sarvam-machine-learning-engineer",
-      "source": "ai",
-      "createdAt": "2026-03-01T07:32:05.586Z"
+      "role": "Sarvam Machine Learning Engineer",
+      "batchId": "sarvam-sarvam-machine-learning-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.476188Z"
     },
     "Sarvam - AI Backend - Pedigree": {
       "company": "Sarvam",
-      "role": "Backend AI Engineer",
-      "batchId": "sarvam-backend-ai-engineer",
-      "source": "ai",
-      "createdAt": "2026-03-01T07:32:05.586Z"
+      "role": "Sarvam Backend AI Engineer",
+      "batchId": "sarvam-sarvam-backend-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.476193Z"
     },
     "Waterlabs AI - AI Engineer": {
       "company": "Waterlabs AI",
@@ -63,10 +66,11 @@
     },
     "Sarvam - ML Eng - Company TG": {
       "company": "Sarvam",
-      "role": "Machine Learning Engineer",
-      "batchId": "sarvam-machine-learning-engineer",
-      "source": "ai",
-      "createdAt": "2026-03-01T07:32:05.586Z"
+      "role": "Sarvam Machine Learning Engineer",
+      "batchId": "sarvam-sarvam-machine-learning-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.475977Z"
     },
     "Shaadi - Stealth- Head of DS - Company": {
       "company": "Stealth",
@@ -126,10 +130,11 @@
     },
     "Zilo - SM - Company TG": {
       "company": "Zilo",
-      "role": "SM",
-      "batchId": "zilo-sm",
-      "source": "ai",
-      "createdAt": "2026-03-01T07:55:38.999Z"
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279021Z"
     },
     "Superliving - Associate Director Analytics - Company +JT TG": {
       "company": "SuperLiving",
@@ -182,10 +187,187 @@
     },
     "Sarvam - Senior Software Engineer - Company TG": {
       "company": "Sarvam",
-      "role": "Senior Software Engineer",
-      "batchId": "sarvam-senior-software-engineer",
-      "source": "ai",
-      "createdAt": "2026-03-03T16:06:15.414Z"
+      "role": "Sarvam Senior Software Developer",
+      "batchId": "sarvam-sarvam-senior-software-developer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:48:53.806860Z"
+    },
+    "Zilo - skill TG mumbai": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279460Z"
+    },
+    "Zilo - Skill TG Mumbai": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279458Z"
+    },
+    "Zilo Backend Engineer - skill TG mumbai": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279464Z"
+    },
+    "Zilo Backend Engineer - Skill TG Mumbai": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279463Z"
+    },
+    "Zilo Backend Engineer - SM - Company TG": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279461Z"
+    },
+    "Zilo Backend Engineer - sm - company tg": {
+      "company": "Zilo",
+      "role": "Zilo Backend Engineer",
+      "batchId": "zilo-zilo-backend-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:46:57.279465Z"
+    },
+    "Zoop - Founders office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632512Z"
+    },
+    "Zoop - Founders Office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632708Z"
+    },
+    "Zoop - founders office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632710Z"
+    },
+    "Sarvam - Senior Software Engineer - Pedigree": {
+      "company": "Sarvam",
+      "role": "Sarvam Senior Software Developer",
+      "batchId": "sarvam-sarvam-senior-software-developer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:48:53.807024Z"
+    },
+    "Sarvam - Senior Software Engineer - pedigree": {
+      "company": "Sarvam",
+      "role": "Sarvam Senior Software Developer",
+      "batchId": "sarvam-sarvam-senior-software-developer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:48:53.807025Z"
+    },
+    "Sarvam - Senior Software Engineer - company TG": {
+      "company": "Sarvam",
+      "role": "Sarvam Senior Software Developer",
+      "batchId": "sarvam-sarvam-senior-software-developer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:48:53.807027Z"
+    },
+    "Sarvam - ML Eng - Pedigree": {
+      "company": "Sarvam",
+      "role": "Sarvam Machine Learning Engineer",
+      "batchId": "sarvam-sarvam-machine-learning-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.476190Z"
+    },
+    "Sarvam - AI Backend - pedigree": {
+      "company": "Sarvam",
+      "role": "Sarvam Backend AI Engineer",
+      "batchId": "sarvam-sarvam-backend-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:49:27.476195Z"
+    },
+    "Zoop - Founder's office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632712Z"
+    },
+    "Zoop - Founder's Office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632713Z"
+    },
+    "Zoop - founder's office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632714Z"
+    },
+    "Zoop - Founder office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632717Z"
+    },
+    "Zoop - Founder Office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632718Z"
+    },
+    "Zoop - founder office - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632719Z"
+    },
+    "Zoop - FO - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632720Z"
+    },
+    "Zoop - fo - Open TG Grapevine.in": {
+      "company": "Zoop",
+      "role": "Zoop Founder's Office",
+      "batchId": "zoop-zoop-founders-office",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-05T12:58:34.632721Z"
     }
   }
 }

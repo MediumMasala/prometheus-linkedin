@@ -136,6 +136,10 @@ export interface InternalRole {
   organicResumes?: number;   // Resumes from organic sources (direct applications, referrals)
   source?: string;
   isLive?: boolean;          // Whether the role is currently live/active
+  // Interview metrics
+  interviewCount?: number;           // Number of candidates who completed interviews
+  totalInterviewDuration?: number;   // Total interview time in seconds
+  avgInterviewDuration?: number;     // Average interview duration in seconds
 }
 
 export interface InternalDataInput {

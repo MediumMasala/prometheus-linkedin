@@ -81,9 +81,26 @@ export function saveBatchingRules(rules: BatchingRules): void {
 export function getBatchForCampaign(campaignName: string): { company: string; role: string; batchId: string } | null {
   const rules = loadBatchingRules();
 
-  // Check exact match first
+  // Check exact match first (case-sensitive)
   if (rules.manualMappings[campaignName]) {
     return rules.manualMappings[campaignName];
+  }
+
+  // Check case-insensitive match
+  const campaignLower = campaignName.toLowerCase().trim();
+  for (const [name, mapping] of Object.entries(rules.manualMappings)) {
+    if (name.toLowerCase().trim() === campaignLower) {
+      return mapping;
+    }
+  }
+
+  // Special handling for Zoop Founder's Office variations
+  if (campaignLower.includes('zoop') && (campaignLower.includes('founder') || campaignLower.includes('fo '))) {
+    return {
+      company: 'Zoop',
+      role: "Zoop Founder's Office",
+      batchId: 'zoop-zoop-founders-office'
+    };
   }
 
   // Check pattern rules

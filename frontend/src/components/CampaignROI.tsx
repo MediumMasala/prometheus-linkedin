@@ -97,6 +97,9 @@ interface InternalRole {
   companyName: string;
   resumes: number;
   source?: string;
+  interviewCount?: number;
+  totalInterviewDuration?: number;
+  avgInterviewDuration?: number;
 }
 
 interface CacheInfo {
@@ -125,6 +128,8 @@ interface PrometheusResponse {
     roles: InternalRole[];
     totalRoles: number;
     totalResumes: number;
+    totalInterviews?: number;
+    totalInterviewDuration?: number;
   };
   batches: {
     batches: CampaignBatch[];
@@ -189,6 +194,13 @@ function getVariantBadge(variantType: string): { label: string; className: strin
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('en-IN').format(value);
+}
+
+function formatDurationMinutes(seconds: number): string {
+  if (!seconds || seconds === 0) return '—';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 1) return '<1 min';
+  return `${minutes} min`;
 }
 
 interface CampaignROIProps {
@@ -573,6 +585,14 @@ export function CampaignROI(_props: CampaignROIProps) {
     );
 
     if (companyRoles.length === 0) return null;
+
+    // FIRST: Try exact match with full jobTitle (case-insensitive)
+    // This handles cases like "Zilo Backend Engineer" === "Zilo Backend Engineer"
+    for (const role of companyRoles) {
+      if (role.jobTitle.toLowerCase().trim() === batchRole) {
+        return role;
+      }
+    }
 
     // Helper: normalize role name by removing company prefix
     const normalizeRole = (jobTitle: string, company: string): string => {
@@ -1230,6 +1250,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                     </button>
                   </div>
                 </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase bg-teal-50">
+                  Interview Time
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1387,6 +1410,22 @@ export function CampaignROI(_props: CampaignROIProps) {
                         );
                       })()}
                     </td>
+                    <td className="px-4 py-3 text-right bg-teal-50">
+                      {batch.matchedRole?.totalInterviewDuration && batch.matchedRole.totalInterviewDuration > 0 ? (
+                        <div className="text-sm">
+                          <span className="font-semibold text-teal-700">
+                            {Math.round(batch.matchedRole.totalInterviewDuration / 60)} min
+                          </span>
+                          {batch.matchedRole.interviewCount && batch.matchedRole.interviewCount > 0 && (
+                            <div className="text-xs text-teal-600">
+                              {batch.matchedRole.interviewCount} interview{batch.matchedRole.interviewCount !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">—</span>
+                      )}
+                    </td>
                   </tr>
                   {/* Expanded campaign details */}
                   {expandedBatches.has(batch.batchId) && batch.campaigns.map((campaign) => (
@@ -1439,6 +1478,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       <td className="px-4 py-2 text-center bg-indigo-50/50 text-sm text-gray-400">
                         —
                       </td>
+                      <td className="px-4 py-2 text-right bg-teal-50/50 text-sm text-gray-400">
+                        —
+                      </td>
                     </tr>
                   ))}
                 </React.Fragment>
@@ -1449,7 +1491,7 @@ export function CampaignROI(_props: CampaignROIProps) {
                 <>
                   {viewMode === 'all' && (
                     <tr className="bg-orange-50">
-                      <td colSpan={10} className="px-4 py-2 text-sm font-semibold text-orange-800">
+                      <td colSpan={11} className="px-4 py-2 text-sm font-semibold text-orange-800">
                         Stand-alone Campaigns ({sortedUngrouped.length})
                       </td>
                     </tr>
@@ -1499,6 +1541,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                         {formatCurrency(campaign.cpc || 0)}
                       </td>
                       <td className="px-4 py-3 text-center bg-indigo-50 text-sm text-gray-400">
+                        —
+                      </td>
+                      <td className="px-4 py-3 text-right bg-teal-50 text-sm text-gray-400">
                         —
                       </td>
                     </tr>

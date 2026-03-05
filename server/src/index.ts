@@ -84,6 +84,7 @@ const {
   LINKEDIN_CLIENT_ID,
   LINKEDIN_CLIENT_SECRET,
   LINKEDIN_AD_ACCOUNT_ID,
+  TAL_LINKEDIN_AD_ACCOUNT_ID,
   LINKEDIN_REDIRECT_URI,
   PORT = 3001,
 } = process.env;
@@ -422,6 +423,131 @@ app.get('/api/linkedin/account', async (req, res) => {
   } catch (error) {
     console.error('Account fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch account' });
+  }
+});
+
+// ============== Tal LinkedIn Routes ==============
+
+// Tal campaign cache
+let talCampaignCache: { data: any; timestamp: number } = { data: null, timestamp: 0 };
+
+app.get('/api/tal/linkedin/campaigns', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
+  }
+
+  const now = Date.now();
+  if (talCampaignCache.data && now - talCampaignCache.timestamp < LEGACY_CACHE_TTL) {
+    return res.json(talCampaignCache.data);
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${TAL_LINKEDIN_AD_ACCOUNT_ID}`);
+    let allCampaigns: any[] = [];
+    let start = 0;
+    const count = 100;
+    let hasMore = true;
+
+    while (hasMore) {
+      const url = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search=(account:(values:List(${accountUrn})))&start=${start}&count=${count}`;
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      });
+
+      const data = await response.json();
+      if (response.ok && data.elements) {
+        allCampaigns = allCampaigns.concat(data.elements);
+        hasMore = data.elements.length >= count && start < 5000;
+        start += count;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    const result = { elements: allCampaigns, total: allCampaigns.length };
+    talCampaignCache = { data: result, timestamp: now };
+    res.json(result);
+  } catch (error) {
+    console.error('Tal campaigns fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch Tal campaigns' });
+  }
+});
+
+app.get('/api/tal/linkedin/analytics', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
+  }
+
+  try {
+    const { startDate: startParam, endDate: endParam } = req.query;
+
+    let startDate: Date, endDate: Date;
+    if (startParam) {
+      startDate = new Date(startParam as string);
+    } else {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+    }
+
+    if (endParam) {
+      endDate = new Date(endParam as string);
+    } else {
+      endDate = new Date();
+    }
+
+    const accountUrn = `urn:li:sponsoredAccount:${TAL_LINKEDIN_AD_ACCOUNT_ID}`;
+    const dateRangeStart = `(day:${startDate.getDate()},month:${startDate.getMonth() + 1},year:${startDate.getFullYear()})`;
+    const dateRangeEnd = `(day:${endDate.getDate()},month:${endDate.getMonth() + 1},year:${endDate.getFullYear()})`;
+
+    const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&pivot=CAMPAIGN&dateRange=(start:${dateRangeStart},end:${dateRangeEnd})&timeGranularity=ALL&accounts=List(${encodeURIComponent(accountUrn)})&fields=impressions,landingPageClicks,costInLocalCurrency&count=1000`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      res.json(data);
+    } else {
+      res.status(response.status).json(data);
+    }
+  } catch (error) {
+    console.error('Tal analytics fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch Tal analytics' });
+  }
+});
+
+app.get('/api/tal/linkedin/account', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.linkedin.com/v2/adAccountsV2/${TAL_LINKEDIN_AD_ACCOUNT_ID}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      }
+    );
+
+    const data = await response.json();
+    if (response.ok) {
+      res.json(data);
+    } else {
+      res.status(response.status).json(data);
+    }
+  } catch (error) {
+    console.error('Tal account fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch Tal account' });
   }
 });
 
@@ -1010,6 +1136,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     linkedInConnected: !!accessToken,
     adAccountId: LINKEDIN_AD_ACCOUNT_ID,
+    talAdAccountId: TAL_LINKEDIN_AD_ACCOUNT_ID,
     mastraEnabled: true,
     authDisabled: process.env.AUTH_DISABLED === 'true',
   });
