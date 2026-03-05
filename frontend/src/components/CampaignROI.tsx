@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { JobApplication } from '../types';
 import { authFetch, useAuth } from '../contexts/AuthContext';
+import {
+  CampaignROISection,
+  SummaryBar,
+  SummaryBarDivider,
+  MetricBlock,
+  MetricRow,
+  MetricCard,
+  AnalyticsCardsGrid,
+  AnalyticsCard,
+  CurrencyIcon,
+  DocumentIcon,
+  WhatsAppIcon,
+} from './ui/CampaignROIBlocks';
 
 // Mapping info type (from backend)
 interface MappingInfo {
@@ -967,136 +980,102 @@ export function CampaignROI(_props: CampaignROIProps) {
         </div>
       </div>
 
-      {/* Spend Overview Bar */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4">
-        <div className="flex items-center justify-between gap-6">
-          {/* Total Spend */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total</span>
-            <span className="text-2xl font-bold text-gray-900">{formatCurrency(totalSpend)}</span>
-          </div>
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* CAMPAIGN ROI SECTION - Clean Block-Based Analytics Layout */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <CampaignROISection>
 
-          {/* Divider */}
-          <div className="h-8 w-px bg-gray-200"></div>
+        {/* LAYER 1: Summary Bar - Horizontal metric blocks */}
+        <SummaryBar>
+          <MetricBlock
+            label="TOTAL"
+            value={formatCurrency(totalSpend)}
+          />
 
-          {/* Paid Spend */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">Paid (Resume)</span>
-            <span className="text-xl font-semibold text-gray-800">{formatCurrency(paidSpend)}</span>
-            <span className="text-xs text-gray-400">{totalCampaigns} campaigns</span>
-          </div>
+          <SummaryBarDivider />
 
-          {/* Divider */}
-          <div className="h-8 w-px bg-gray-200"></div>
+          <MetricBlock
+            label="PAID (RESUME)"
+            value={formatCurrency(paidSpend)}
+            subtext={`${totalCampaigns} campaigns`}
+            labelColor="text-blue-600"
+          />
 
-          {/* WhatsApp Spend */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-emerald-600 uppercase tracking-wide">WhatsApp</span>
-            <span className="text-xl font-semibold text-gray-800">{formatCurrency(whatsappSpend)}</span>
-            <span className="text-xs text-gray-400">{whatsappCampaigns.length} campaigns</span>
-          </div>
+          <SummaryBarDivider />
 
-          {/* Spacer */}
-          <div className="flex-1"></div>
+          <MetricBlock
+            label="WHATSAPP"
+            value={formatCurrency(whatsappSpend)}
+            subtext={`${whatsappCampaigns.length} campaigns`}
+            labelColor="text-emerald-600"
+          />
 
-          {/* Date Range Indicator */}
-          <div className="text-xs text-gray-400">
+          <div className="flex-1" />
+
+          {/* Date indicator - right aligned */}
+          <div className="text-sm font-medium text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg">
             {startDate === endDate ? startDate : `${startDate} → ${endDate}`}
           </div>
-        </div>
-      </div>
+        </SummaryBar>
 
-      {/* Paid Campaigns - Compact Inline Row */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-3">
-        <div className="flex items-center gap-6 flex-wrap">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Paid Campaigns</span>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-400">Impressions</span>
-            <span className="text-sm font-semibold text-gray-700">{formatNumber(paidImpressions)}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-400">LP Clicks</span>
-            <span className="text-sm font-semibold text-gray-700">{formatNumber(paidLPClicks)}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-gray-400">CPC</span>
-            <span className="text-sm font-semibold text-gray-700">{formatCurrency(paidCPC)}</span>
-          </div>
-          <div className="flex items-center gap-1 ml-auto">
-            <span className="text-xs text-blue-500">Paid Resumes</span>
-            <span className="text-sm font-bold text-blue-700">{paidResumes}</span>
-          </div>
-        </div>
-      </div>
+        {/* LAYER 2: Campaign Performance - Compact metric cards row */}
+        <MetricRow title="Paid Campaigns Performance">
+          <MetricCard label="Impressions" value={formatNumber(paidImpressions)} />
+          <MetricCard label="LP Clicks" value={formatNumber(paidLPClicks)} />
+          <MetricCard label="CPC" value={formatCurrency(paidCPC)} />
+          <div className="flex-1" />
+          <MetricCard
+            label="Paid Resumes"
+            value={paidResumes}
+            highlight
+          />
+        </MetricRow>
 
-      {/* Hero Outcome Cards - Cost/Resume + Total Resumes */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Cost per Resume Card */}
-        <div className="bg-white rounded-xl shadow-sm border-l-4 border-l-orange-400 border-t border-r border-b border-gray-100 p-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-semibold text-orange-600 uppercase tracking-wide mb-1">Cost / Paid Resume</p>
-              <p className="text-4xl font-bold text-gray-900">{formatCurrency(costPerPaidResume)}</p>
-              <p className="text-sm text-gray-500 mt-2">
-                {formatCurrency(paidSpend)} ÷ {paidResumes} resumes
-              </p>
-            </div>
-            <div className="p-3 bg-orange-50 rounded-full">
-              <svg className="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-        </div>
+        {/* LAYER 3: Analytics Cards - Large side-by-side cards */}
+        <AnalyticsCardsGrid columns={2}>
+          {/* Cost per Resume Card */}
+          <AnalyticsCard
+            title="Cost / Paid Resume"
+            value={formatCurrency(costPerPaidResume)}
+            subtext={`${formatCurrency(paidSpend)} ÷ ${paidResumes} resumes`}
+            accentColor="orange"
+            icon={<CurrencyIcon className="w-6 h-6 text-orange-400" />}
+          />
 
-        {/* Total Resumes Card */}
-        <div className="bg-white rounded-xl shadow-sm border-l-4 border-l-blue-400 border-t border-r border-b border-gray-100 p-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1">Total Resumes</p>
-              <p className="text-4xl font-bold text-gray-900">{totalResumes}</p>
-              <p className="text-sm text-gray-500 mt-2">
-                <span className="text-blue-600 font-medium">{paidResumes}</span> paid · <span className="text-green-600 font-medium">{organicResumes}</span> organic
-              </p>
-            </div>
-            <div className="p-3 bg-blue-50 rounded-full">
-              <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-      </div>
+          {/* Total Resumes Card */}
+          <AnalyticsCard
+            title="Total Resumes"
+            value={totalResumes}
+            subtext={
+              <>
+                <span className="text-blue-600 font-medium">{paidResumes}</span> paid{' '}
+                <span className="mx-1">•</span>{' '}
+                <span className="text-green-600 font-medium">{organicResumes}</span> organic
+              </>
+            }
+            accentColor="blue"
+            icon={<DocumentIcon className="w-6 h-6 text-blue-400" />}
+          />
+        </AnalyticsCardsGrid>
 
-      {/* WhatsApp Section - Left Border Accent */}
-      {whatsappCampaigns.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border-l-4 border-l-emerald-400 border-t border-r border-b border-gray-100 px-5 py-4">
-          <div className="flex items-center gap-6 flex-wrap">
+        {/* WhatsApp Metrics Row (conditional) */}
+        {whatsappCampaigns.length > 0 && (
+          <MetricRow>
             <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-              </svg>
+              <WhatsAppIcon className="w-4 h-4 text-emerald-500" />
               <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">WhatsApp</span>
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">Spend</span>
-              <span className="text-sm font-semibold text-gray-700">{formatCurrency(whatsappSpend)}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">Impressions</span>
-              <span className="text-sm font-semibold text-gray-700">{formatNumber(whatsappImpressions)}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">CTR</span>
-              <span className="text-sm font-semibold text-gray-700">{whatsappCTR.toFixed(2)}%</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">CPC</span>
-              <span className="text-sm font-semibold text-gray-700">{formatCurrency(whatsappCPC)}</span>
-            </div>
-          </div>
-        </div>
-      )}
+            <MetricCard label="Spend" value={formatCurrency(whatsappSpend)} />
+            <MetricCard label="Impressions" value={formatNumber(whatsappImpressions)} />
+            <MetricCard label="CTR" value={`${whatsappCTR.toFixed(2)}%`} />
+            <MetricCard label="CPC" value={formatCurrency(whatsappCPC)} />
+          </MetricRow>
+        )}
+
+      </CampaignROISection>
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* END CAMPAIGN ROI SECTION */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
 
       {/* Batches Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
