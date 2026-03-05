@@ -672,6 +672,10 @@ export function CampaignROI(_props: CampaignROIProps) {
         aVal = a.costPerResume || Infinity;
         bVal = b.costPerResume || Infinity;
         break;
+      case 'impressions':
+        aVal = a.aggregatedMetrics.totalImpressions;
+        bVal = b.aggregatedMetrics.totalImpressions;
+        break;
       case 'lpClicks':
         aVal = a.aggregatedMetrics.totalLandingPageClicks;
         bVal = b.aggregatedMetrics.totalLandingPageClicks;
@@ -708,6 +712,10 @@ export function CampaignROI(_props: CampaignROIProps) {
       case 'spend':
         aVal = a.spend || 0;
         bVal = b.spend || 0;
+        break;
+      case 'impressions':
+        aVal = a.impressions || 0;
+        bVal = b.impressions || 0;
         break;
       case 'lpClicks':
         aVal = a.landingPageClicks || 0;
@@ -1171,6 +1179,15 @@ export function CampaignROI(_props: CampaignROIProps) {
                 </th>
                 <th
                   className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('impressions')}
+                >
+                  <div className="flex items-center justify-end">
+                    Impressions
+                    <SortIcon column="impressions" />
+                  </div>
+                </th>
+                <th
+                  className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100 select-none"
                   onClick={() => handleSort('lpClicks')}
                 >
                   <div className="flex items-center justify-end">
@@ -1297,6 +1314,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
+                      {formatNumber(batch.aggregatedMetrics.totalImpressions)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-600">
                       {formatNumber(batch.aggregatedMetrics.totalLandingPageClicks)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-gray-600">
@@ -1405,6 +1425,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                         —
                       </td>
                       <td className="px-4 py-2 text-right text-sm text-gray-500">
+                        {formatNumber(campaign.metrics.impressions)}
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm text-gray-500">
                         {formatNumber(campaign.metrics.landingPageClicks)}
                       </td>
                       <td className="px-4 py-2 text-right text-sm text-gray-500">
@@ -1426,7 +1449,7 @@ export function CampaignROI(_props: CampaignROIProps) {
                 <>
                   {viewMode === 'all' && (
                     <tr className="bg-orange-50">
-                      <td colSpan={9} className="px-4 py-2 text-sm font-semibold text-orange-800">
+                      <td colSpan={10} className="px-4 py-2 text-sm font-semibold text-orange-800">
                         Stand-alone Campaigns ({sortedUngrouped.length})
                       </td>
                     </tr>
@@ -1462,6 +1485,9 @@ export function CampaignROI(_props: CampaignROIProps) {
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-gray-400 bg-orange-50">
                         —
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-600">
+                        {formatNumber(campaign.impressions || 0)}
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-gray-600">
                         {formatNumber(campaign.landingPageClicks)}
