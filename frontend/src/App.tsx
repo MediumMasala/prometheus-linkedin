@@ -8,6 +8,7 @@ import { Tabs } from './components/Tabs';
 import { CampaignPerformance } from './components/CampaignPerformance';
 import { LinkedInDashboard } from './components/LinkedInDashboard';
 import { CampaignROI } from './components/CampaignROI';
+import { Messaging } from './components/Messaging';
 import { LoginPage } from './components/LoginPage';
 import { Settings } from './components/Settings';
 // TalCharacterMarketing - coming soon
@@ -35,6 +36,7 @@ const ROUND_ONE_TABS = [
   { id: 'campaigns', label: 'Campaign Performance' },
   { id: 'linkedin', label: 'LinkedIn Ads' },
   { id: 'roi', label: 'Campaign ROI' },
+  { id: 'messaging', label: 'Messaging' },
 ];
 
 function AppContent() {
@@ -301,6 +303,10 @@ function AppContent() {
 
               {activeSubTab === 'roi' && (
                 <CampaignROI fetchApplications={fetchJobApplications} />
+              )}
+
+              {activeSubTab === 'messaging' && (
+                <Messaging />
               )}
             </>
           )}

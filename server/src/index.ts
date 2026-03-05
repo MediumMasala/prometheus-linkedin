@@ -59,6 +59,7 @@ import {
   CACHE_CONFIG,
 } from './lib/analysis-cache.js';
 import cron from 'node-cron';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config();
 
@@ -806,6 +807,200 @@ app.get('/api/applications', async (req, res) => {
   } catch (error) {
     console.error('Resumes fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch resumes' });
+  }
+});
+
+// Get resume data by company and role with date range support
+app.get('/api/resumes/by-role', async (req, res) => {
+  try {
+    const { company, role, startDate, endDate } = req.query;
+
+    if (!company || !role) {
+      return res.status(400).json({ error: 'Company and role are required' });
+    }
+
+    const companyLower = (company as string).toLowerCase().trim();
+    const roleLower = (role as string).toLowerCase().trim();
+
+    // Helper to filter and aggregate data
+    const filterAndAggregate = (data: any[]) => {
+      // Find matching entries - check both company_name and job_title
+      const matches = data.filter((item: any) => {
+        const itemCompany = (item.company_name || '').toLowerCase().trim();
+        const itemRole = (item.job_title || '').toLowerCase().trim();
+
+        // Check if company matches
+        const companyMatch = itemCompany.includes(companyLower) || companyLower.includes(itemCompany);
+
+        // Check if role matches (also check if job_title contains company name prefix)
+        const roleMatch =
+          itemRole.includes(roleLower) ||
+          roleLower.includes(itemRole) ||
+          itemRole.replace(companyLower, '').trim().includes(roleLower) ||
+          roleLower.includes(itemRole.replace(companyLower, '').trim());
+
+        return companyMatch && roleMatch;
+      });
+
+      if (matches.length > 0) {
+        return matches.reduce(
+          (acc: any, item: any) => ({
+            count: acc.count + (item.count || 0),
+            tier1_count: acc.tier1_count + (item.tier1_count || 0),
+            non_tier1_count: acc.non_tier1_count + (item.non_tier1_count || 0),
+            supreme_count: acc.supreme_count + (item.supreme_count || 0),
+          }),
+          { count: 0, tier1_count: 0, non_tier1_count: 0, supreme_count: 0 }
+        );
+      }
+
+      // Try broader company-only match
+      const companyMatches = data.filter((item: any) => {
+        const itemCompany = (item.company_name || '').toLowerCase().trim();
+        return itemCompany.includes(companyLower) || companyLower.includes(itemCompany);
+      });
+
+      if (companyMatches.length > 0) {
+        return companyMatches.reduce(
+          (acc: any, item: any) => ({
+            count: acc.count + (item.count || 0),
+            tier1_count: acc.tier1_count + (item.tier1_count || 0),
+            non_tier1_count: acc.non_tier1_count + (item.non_tier1_count || 0),
+            supreme_count: acc.supreme_count + (item.supreme_count || 0),
+          }),
+          { count: 0, tier1_count: 0, non_tier1_count: 0, supreme_count: 0 }
+        );
+      }
+
+      return { count: 0, tier1_count: 0, non_tier1_count: 0, supreme_count: 0 };
+    };
+
+    // If date range provided, fetch day by day
+    if (startDate && endDate) {
+      const start = new Date(startDate as string);
+      const end = new Date(endDate as string);
+      const aggregated = { count: 0, tier1_count: 0, non_tier1_count: 0, supreme_count: 0 };
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        const url = `${BACKEND_API_URL}/round1-userResume-count/?unique_id=${UNIQUE_ID_RESUMES}&created_at=${dateStr}`;
+
+        try {
+          const response = await fetch(url);
+          const data = await response.json();
+
+          if (response.ok && data.data) {
+            const dayResult = filterAndAggregate(data.data);
+            aggregated.count += dayResult.count;
+            aggregated.tier1_count += dayResult.tier1_count;
+            aggregated.non_tier1_count += dayResult.non_tier1_count;
+            aggregated.supreme_count += dayResult.supreme_count;
+          }
+        } catch (err) {
+          console.error(`Error fetching data for ${dateStr}:`, err);
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      return res.json(aggregated);
+    }
+
+    // No date range - fetch all time
+    const url = `${BACKEND_API_URL}/round1-userResume-count/?unique_id=${UNIQUE_ID_RESUMES}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (response.ok && data.data) {
+      res.json(filterAndAggregate(data.data));
+    } else {
+      res.json({ count: 0, tier1_count: 0, non_tier1_count: 0, supreme_count: 0 });
+    }
+  } catch (error) {
+    console.error('Resume by role fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch resume data' });
+  }
+});
+
+// ============== Messaging API ==============
+
+// Generate client message using Gemini
+app.post('/api/messaging/generate', async (req, res) => {
+  try {
+    const { company, role, metrics, dateRange } = req.body;
+
+    if (!company || !role) {
+      return res.status(400).json({ error: 'Company and role are required' });
+    }
+
+    // Initialize Gemini
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    if (!apiKey) {
+      console.warn('Gemini API key not configured, using fallback');
+      return res.status(503).json({ error: 'Gemini not configured' });
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' });
+
+    // Calculate timeframe
+    const daysDiff = dateRange?.startDate && dateRange?.endDate
+      ? Math.ceil((new Date(dateRange.endDate).getTime() - new Date(dateRange.startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1
+      : 3;
+    const timeframe = daysDiff <= 1 ? 'today' : `in the last ${daysDiff} days`;
+
+    // Top Indian startups/companies for credibility (randomly pick 2-3)
+    const topCompanies = [
+      'Razorpay', 'Zerodha', 'CRED', 'PhonePe', 'Swiggy', 'Zomato', 'Flipkart',
+      'Meesho', 'Groww', 'Slice', 'Jupiter', 'Paytm', 'Dream11', 'ShareChat',
+      'Unacademy', 'upGrad', 'Vedantu', 'Ola', 'Urban Company',
+      'Nykaa', 'BigBasket', 'Dunzo', 'Rapido', 'Lenskart', 'BoAt', 'Mamaearth',
+      'Freshworks', 'Chargebee', 'Postman', 'BrowserStack', 'Hasura', 'Polygon'
+    ];
+
+    // Pick 3 random companies
+    const shuffled = topCompanies.sort(() => 0.5 - Math.random());
+    const selectedCompanies = shuffled.slice(0, 3);
+
+    // Format resume count based on rules
+    const resumeCount = metrics?.totalResumes || 0;
+    const resumeText = resumeCount < 10 ? 'a couple of resumes' : `${resumeCount} resumes`;
+
+    const prompt = `You are a messaging assistant for Round1, a hiring platform. Generate a client update message for an active role.
+
+INPUTS:
+- Company name: ${company}
+- Role title: ${role}
+- Number of resumes received: ${resumeCount}
+- Number of impressions: ${metrics?.impressions || 0}
+- Number of landing page visitors: ${metrics?.landingPageClicks || 0}
+- Number of days since role went live: ${daysDiff}
+- Top company names candidates are from: ${selectedCompanies.join(', ')}
+
+STRICT RULES - FOLLOW EXACTLY:
+1. NEVER mention LinkedIn or any specific acquisition channel. Use vague terms like "our candidate channels", "our candidate network", "our outreach channels".
+2. If resumes < 10, say "a couple of resumes" instead of the exact number. If resumes >= 10, show the actual number. Use this: "${resumeText}"
+3. Always mention 2-3 top Indian startup/company names that candidates are coming from to build credibility. Frame it as: "We're seeing interest from engineers at [Company1], [Company2], and [Company3]."
+4. NEVER use em dashes (—). Use commas or periods instead.
+5. Lead with resumes in the stats, impressions last.
+6. Include a line about evaluating resumes and sharing shortlisted profiles soon.
+7. Frame the update as "behind the scenes" work to show momentum and velocity.
+8. Keep the tone professional, confident, and concise.
+9. Sign off as "Team Round1".
+10. Do not include a subject line.
+11. Use bullet points with • symbol, not dashes.
+12. Only include metrics that have non-zero values.
+
+OUTPUT: Generate a single ready-to-send message following all rules above.`;
+
+    const result = await model.generateContent(prompt);
+    const message = result.response.text();
+
+    res.json({ message, company, role, metrics });
+  } catch (error) {
+    console.error('Messaging generation error:', error);
+    res.status(500).json({ error: 'Failed to generate message' });
   }
 });
 
