@@ -32,10 +32,12 @@ export function LinkedInCallback() {
 
   const exchangeCodeForToken = async (code: string) => {
     try {
+      // Pass the redirect URI to match what was used in the auth request
+      const redirectUri = `${window.location.origin}/callback`;
       const response = await fetch('/api/linkedin/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, redirectUri }),
       });
 
       const data = await response.json();
