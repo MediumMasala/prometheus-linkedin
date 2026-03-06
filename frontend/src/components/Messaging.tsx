@@ -421,19 +421,15 @@ export function Messaging() {
 
       const lines: string[] = [];
       lines.push('*Updates from Round1AI Team*');
-      lines.push(`*${company}* (${days} day${days > 1 ? 's' : ''} update)`);
+      lines.push(`${company} (${days} day${days > 1 ? 's' : ''} update)`);
       lines.push('');
-      lines.push(`*${companyData.totalInterviewMinutes} Minutes* of AI Interview were conducted`);
+      lines.push('_Across all live roles:_');
+      if (companyData.totalInterviewMinutes >= 50) {
+        lines.push(`*${companyData.totalInterviewMinutes} Minutes* of AI Interview were conducted`);
+      }
       lines.push(`*${companyData.totalResumes}+* resumes received`);
       lines.push(`*${totalInterest}+* people showed interest`);
       lines.push(`*${formatReach(companyData.totalImpressions)}* reach across our candidate network`);
-      lines.push('');
-
-      // Role-wise breakdown
-      lines.push('*Role-wise breakdown:*');
-      companyData.roles.forEach(r => {
-        lines.push(`• ${r.role}: ${r.matchedResumes} resumes, ${r.interviewMinutes} min AI interviews`);
-      });
       lines.push('');
 
       if (candidateCompanies.length > 0) {
@@ -447,9 +443,11 @@ export function Messaging() {
       // TYPE 2: Role-level update
       const lines: string[] = [];
       lines.push('*Updates from Round1AI Team*');
-      lines.push(`*${role}*, ${company} (${days} day${days > 1 ? 's' : ''} update)`);
+      lines.push(`${role}, ${company} (${days} day${days > 1 ? 's' : ''} update)`);
       lines.push('');
-      lines.push(`*${metrics.interviewMinutes} Minutes* of AI Interview were conducted`);
+      if (metrics.interviewMinutes >= 50) {
+        lines.push(`*${metrics.interviewMinutes} Minutes* of AI Interview were conducted`);
+      }
       lines.push(`*${metrics.totalResumes}+* resumes received`);
       lines.push(`*${metrics.landingPageClicks}+* people showed interest`);
       lines.push(`*${formatReach(metrics.impressions)}* reach across our candidate network`);
