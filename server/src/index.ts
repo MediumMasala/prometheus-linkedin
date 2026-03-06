@@ -763,6 +763,557 @@ app.post('/api/linkedin/campaigns', async (req, res) => {
   }
 });
 
+// ============== LinkedIn Campaign Groups ==============
+
+// Get all campaign groups
+app.get('/api/linkedin/campaign-groups', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const url = `https://api.linkedin.com/v2/adCampaignGroupsV2?q=search&search=(account:(values:List(${accountUrn})))&count=100`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Campaign groups fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch campaign groups' });
+  }
+});
+
+// Create campaign group
+app.post('/api/linkedin/campaign-groups', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { name, status = 'ACTIVE', totalBudget, runSchedule } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Campaign group name is required' });
+    }
+
+    const groupData: any = {
+      account: `urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`,
+      name,
+      status,
+    };
+
+    if (totalBudget) {
+      groupData.totalBudget = { amount: String(totalBudget), currencyCode: 'INR' };
+    }
+    if (runSchedule) {
+      groupData.runSchedule = runSchedule;
+    }
+
+    const response = await fetch('https://api.linkedin.com/v2/adCampaignGroupsV2', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(groupData),
+    });
+
+    const responseText = await response.text();
+    const data = responseText ? JSON.parse(responseText) : null;
+
+    if (response.ok || response.status === 201) {
+      res.json({ success: true, message: `Campaign group "${name}" created`, data });
+    } else {
+      res.status(response.status).json({ error: 'Failed to create campaign group', details: data });
+    }
+  } catch (error) {
+    console.error('Campaign group creation error:', error);
+    res.status(500).json({ error: 'Failed to create campaign group' });
+  }
+});
+
+// Update campaign group
+app.patch('/api/linkedin/campaign-groups/:id', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { id } = req.params;
+    const { name, status, totalBudget } = req.body;
+
+    const updateFields: any = {};
+    if (name) updateFields.name = name;
+    if (status) updateFields.status = status;
+    if (totalBudget) updateFields.totalBudget = { amount: String(totalBudget), currencyCode: 'INR' };
+
+    const response = await fetch(`https://api.linkedin.com/v2/adCampaignGroupsV2/${id}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+        'X-RestLi-Method': 'PARTIAL_UPDATE',
+      },
+      body: JSON.stringify({ patch: { $set: updateFields } }),
+    });
+
+    if (response.ok || response.status === 204) {
+      res.json({ success: true, message: `Campaign group ${id} updated` });
+    } else {
+      const data = await response.text();
+      res.status(response.status).json({ error: 'Failed to update campaign group', details: data });
+    }
+  } catch (error) {
+    console.error('Campaign group update error:', error);
+    res.status(500).json({ error: 'Failed to update campaign group' });
+  }
+});
+
+// ============== LinkedIn Creatives ==============
+
+// Get creatives for a campaign
+app.get('/api/linkedin/campaigns/:campaignId/creatives', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { campaignId } = req.params;
+    const campaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+    const url = `https://api.linkedin.com/v2/adCreativesV2?q=search&search=(campaign:(values:List(${campaignUrn})))&count=100`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Creatives fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch creatives' });
+  }
+});
+
+// Get all creatives for account
+app.get('/api/linkedin/creatives', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const url = `https://api.linkedin.com/v2/adCreativesV2?q=search&search=(account:(values:List(${accountUrn})))&count=100`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Creatives fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch creatives' });
+  }
+});
+
+// Update creative status
+app.patch('/api/linkedin/creatives/:id/status', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // ACTIVE, PAUSED, ARCHIVED
+
+    const response = await fetch(`https://api.linkedin.com/v2/adCreativesV2/${id}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+        'X-RestLi-Method': 'PARTIAL_UPDATE',
+      },
+      body: JSON.stringify({ patch: { $set: { status } } }),
+    });
+
+    if (response.ok || response.status === 204) {
+      res.json({ success: true, message: `Creative ${id} status updated to ${status}` });
+    } else {
+      const data = await response.text();
+      res.status(response.status).json({ error: 'Failed to update creative', details: data });
+    }
+  } catch (error) {
+    console.error('Creative update error:', error);
+    res.status(500).json({ error: 'Failed to update creative' });
+  }
+});
+
+// ============== LinkedIn Bulk Operations ==============
+
+// Bulk update campaign statuses
+app.post('/api/linkedin/campaigns/bulk-status', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { campaignIds, status } = req.body; // campaignIds: string[], status: ACTIVE/PAUSED/ARCHIVED
+
+    if (!campaignIds || !Array.isArray(campaignIds) || !status) {
+      return res.status(400).json({ error: 'Provide campaignIds array and status' });
+    }
+
+    const results = [];
+    for (const id of campaignIds) {
+      try {
+        const response = await fetch(`https://api.linkedin.com/v2/adCampaignsV2/${id}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'X-Restli-Protocol-Version': '2.0.0',
+            'Content-Type': 'application/json',
+            'X-RestLi-Method': 'PARTIAL_UPDATE',
+          },
+          body: JSON.stringify({ patch: { $set: { status } } }),
+        });
+        results.push({ id, success: response.ok || response.status === 204 });
+      } catch (e) {
+        results.push({ id, success: false, error: String(e) });
+      }
+    }
+
+    legacyCampaignCache = { data: null, timestamp: 0 };
+    res.json({ success: true, results });
+  } catch (error) {
+    console.error('Bulk status update error:', error);
+    res.status(500).json({ error: 'Failed to bulk update campaigns' });
+  }
+});
+
+// Duplicate a campaign
+app.post('/api/linkedin/campaigns/:id/duplicate', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { id } = req.params;
+    const { newName } = req.body;
+
+    // Get source campaign
+    const sourceRes = await fetch(`https://api.linkedin.com/v2/adCampaignsV2/${id}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const sourceCampaign = await sourceRes.json();
+
+    if (!sourceCampaign.id) {
+      return res.status(404).json({ error: 'Source campaign not found' });
+    }
+
+    // Create new campaign with same settings
+    const newCampaign: any = {
+      account: sourceCampaign.account,
+      campaignGroup: sourceCampaign.campaignGroup,
+      name: newName || `${sourceCampaign.name} (Copy)`,
+      status: 'PAUSED', // Always create as paused
+      type: sourceCampaign.type,
+      costType: sourceCampaign.costType,
+      objectiveType: sourceCampaign.objectiveType,
+      targetingCriteria: sourceCampaign.targetingCriteria,
+      locale: sourceCampaign.locale,
+    };
+
+    if (sourceCampaign.dailyBudget) newCampaign.dailyBudget = sourceCampaign.dailyBudget;
+    if (sourceCampaign.unitCost) newCampaign.unitCost = sourceCampaign.unitCost;
+    if (sourceCampaign.runSchedule) {
+      newCampaign.runSchedule = {
+        start: Date.now(),
+        end: sourceCampaign.runSchedule.end
+      };
+    }
+
+    const response = await fetch('https://api.linkedin.com/v2/adCampaignsV2', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(newCampaign),
+    });
+
+    const responseText = await response.text();
+    let data = null;
+    try { data = JSON.parse(responseText); } catch (e) {}
+
+    if (response.ok || response.status === 201) {
+      const newId = response.headers.get('x-restli-id') || data?.id;
+      legacyCampaignCache = { data: null, timestamp: 0 };
+      res.json({ success: true, message: 'Campaign duplicated', newCampaignId: newId, data });
+    } else {
+      res.status(response.status).json({ error: 'Failed to duplicate campaign', details: data || responseText });
+    }
+  } catch (error) {
+    console.error('Campaign duplicate error:', error);
+    res.status(500).json({ error: 'Failed to duplicate campaign' });
+  }
+});
+
+// ============== LinkedIn Targeting Facets ==============
+
+// Get available targeting facets (for UI)
+app.get('/api/linkedin/targeting/facets', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  // Return list of available targeting facet types
+  res.json({
+    facets: [
+      { id: 'locations', name: 'Locations', urn: 'urn:li:adTargetingFacet:locations' },
+      { id: 'profileLocations', name: 'Profile Locations', urn: 'urn:li:adTargetingFacet:profileLocations' },
+      { id: 'interfaceLocales', name: 'Interface Locales', urn: 'urn:li:adTargetingFacet:interfaceLocales' },
+      { id: 'employers', name: 'Current Employers', urn: 'urn:li:adTargetingFacet:employers' },
+      { id: 'employersAll', name: 'Current or Past Employers', urn: 'urn:li:adTargetingFacet:employersAll' },
+      { id: 'titles', name: 'Job Titles', urn: 'urn:li:adTargetingFacet:titles' },
+      { id: 'titlesAll', name: 'Current or Past Titles', urn: 'urn:li:adTargetingFacet:titlesAll' },
+      { id: 'skills', name: 'Skills', urn: 'urn:li:adTargetingFacet:skills' },
+      { id: 'industries', name: 'Industries', urn: 'urn:li:adTargetingFacet:industries' },
+      { id: 'seniorities', name: 'Seniority Levels', urn: 'urn:li:adTargetingFacet:seniorities' },
+      { id: 'functions', name: 'Job Functions', urn: 'urn:li:adTargetingFacet:functions' },
+      { id: 'yearsOfExperienceRanges', name: 'Years of Experience', urn: 'urn:li:adTargetingFacet:yearsOfExperienceRanges' },
+      { id: 'degrees', name: 'Degrees', urn: 'urn:li:adTargetingFacet:degrees' },
+      { id: 'fieldsOfStudy', name: 'Fields of Study', urn: 'urn:li:adTargetingFacet:fieldsOfStudy' },
+      { id: 'schools', name: 'Schools', urn: 'urn:li:adTargetingFacet:schools' },
+      { id: 'companySize', name: 'Company Size', urn: 'urn:li:adTargetingFacet:staffCountRanges' },
+      { id: 'age', name: 'Age Ranges', urn: 'urn:li:adTargetingFacet:ageRanges' },
+      { id: 'gender', name: 'Gender', urn: 'urn:li:adTargetingFacet:genders' },
+    ]
+  });
+});
+
+// Search for targeting entities (companies, titles, skills, etc.)
+app.get('/api/linkedin/targeting/search', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { facet, query } = req.query;
+
+    if (!facet || !query) {
+      return res.status(400).json({ error: 'Provide facet and query params' });
+    }
+
+    // Use typeahead endpoint for searching
+    const url = `https://api.linkedin.com/v2/adTargetingFacets?q=typeahead&queryTerm=${encodeURIComponent(query as string)}&facet=urn:li:adTargetingFacet:${facet}&count=20`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Targeting search error:', error);
+    res.status(500).json({ error: 'Failed to search targeting' });
+  }
+});
+
+// ============== LinkedIn Reporting ==============
+
+// Get campaign performance breakdown by day
+app.get('/api/linkedin/campaigns/:id/performance', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    const dateRangeStart = `(day:${start.getDate()},month:${start.getMonth() + 1},year:${start.getFullYear()})`;
+    const dateRangeEnd = `(day:${end.getDate()},month:${end.getMonth() + 1},year:${end.getFullYear()})`;
+    const campaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${id}`);
+
+    const url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&pivot=CAMPAIGN&dateRange=(start:${dateRangeStart},end:${dateRangeEnd})&timeGranularity=DAILY&campaigns=List(${campaignUrn})&fields=impressions,clicks,landingPageClicks,costInLocalCurrency,shares,comments,likes,follows`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Campaign performance error:', error);
+    res.status(500).json({ error: 'Failed to fetch campaign performance' });
+  }
+});
+
+// Get creative-level analytics
+app.get('/api/linkedin/analytics/by-creative', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { startDate, endDate, campaignId } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    const dateRangeStart = `(day:${start.getDate()},month:${start.getMonth() + 1},year:${start.getFullYear()})`;
+    const dateRangeEnd = `(day:${end.getDate()},month:${end.getMonth() + 1},year:${end.getFullYear()})`;
+
+    let url = `https://api.linkedin.com/v2/adAnalyticsV2?q=analytics&pivot=CREATIVE&dateRange=(start:${dateRangeStart},end:${dateRangeEnd})&timeGranularity=ALL&fields=impressions,clicks,landingPageClicks,costInLocalCurrency`;
+
+    if (campaignId) {
+      const campaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      url += `&campaigns=List(${campaignUrn})`;
+    } else {
+      const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+      url += `&accounts=List(${accountUrn})`;
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Creative analytics error:', error);
+    res.status(500).json({ error: 'Failed to fetch creative analytics' });
+  }
+});
+
+// ============== LinkedIn Conversions ==============
+
+// Get conversion events
+app.get('/api/linkedin/conversions', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const url = `https://api.linkedin.com/v2/conversions?q=account&account=${accountUrn}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Conversions fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch conversions' });
+  }
+});
+
+// ============== LinkedIn Audience (Matched Audiences) ==============
+
+// Get matched audiences
+app.get('/api/linkedin/audiences', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const url = `https://api.linkedin.com/v2/dmpSegments?q=account&account=${accountUrn}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Audiences fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch audiences' });
+  }
+});
+
+// ============== LinkedIn Forms ==============
+
+// Get lead gen forms
+app.get('/api/linkedin/forms', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const url = `https://api.linkedin.com/v2/adForms?q=account&account=${accountUrn}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Forms fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch forms' });
+  }
+});
+
+// Get form submissions
+app.get('/api/linkedin/forms/:formId/submissions', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { formId } = req.params;
+    const formUrn = encodeURIComponent(`urn:li:leadGenForm:${formId}`);
+    const url = `https://api.linkedin.com/v2/adFormResponses?q=form&form=${formUrn}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Form submissions error:', error);
+    res.status(500).json({ error: 'Failed to fetch form submissions' });
+  }
+});
+
 // ============== Tal LinkedIn Routes ==============
 
 // Tal campaign cache
