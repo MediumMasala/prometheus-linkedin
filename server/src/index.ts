@@ -238,8 +238,18 @@ app.delete('/api/users/:userId', requireAdmin, (req: AuthRequest, res) => {
 
 app.get('/api/linkedin/auth-url', (req, res) => {
   // Dynamically determine redirect URI based on request origin
-  const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost:5173';
-  const redirectUri = `${origin.replace(/\/$/, '')}/callback`;
+  // Extract origin from referer (e.g., "https://example.com/path" -> "https://example.com")
+  let origin = req.headers.origin;
+  if (!origin && req.headers.referer) {
+    try {
+      const refererUrl = new URL(req.headers.referer);
+      origin = refererUrl.origin;
+    } catch (e) {
+      origin = 'http://localhost:5173';
+    }
+  }
+  origin = origin || 'http://localhost:5173';
+  const redirectUri = `${origin}/callback`;
 
   const scopes = ['r_ads', 'r_ads_reporting', 'rw_ads'].join('%20');
   const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${LINKEDIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}`;
@@ -249,9 +259,8 @@ app.get('/api/linkedin/auth-url', (req, res) => {
 app.post('/api/linkedin/token', async (req, res) => {
   const { code, redirectUri } = req.body;
 
-  // Use provided redirectUri or fall back to origin-based detection
-  const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, '') || 'http://localhost:5173';
-  const finalRedirectUri = redirectUri || `${origin.replace(/\/$/, '')}/callback`;
+  // Use provided redirectUri (from frontend) - this is the most reliable
+  const finalRedirectUri = redirectUri || 'http://localhost:5173/callback';
 
   try {
     const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
