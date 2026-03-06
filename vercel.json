@@ -6,6 +6,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://prometheus-linkedin.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
