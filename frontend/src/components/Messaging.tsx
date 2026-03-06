@@ -394,7 +394,8 @@ export function Messaging() {
     }
   }, [selectedRole, messageType, startDate, endDate]);
 
-  // Generate message following Round1AI format
+  // Generate message following Round1AI format (WhatsApp markdown)
+  // WhatsApp formatting: *bold*, _italic_, ~strikethrough~
   const generateRound1Message = (
     type: MessageType,
     company: string,
@@ -404,61 +405,60 @@ export function Messaging() {
   ): string => {
     const days = daysSinceLive;
     // Auto-randomize candidate companies each time
-    const companies = getRandomCompanies().split(',').map(c => c.trim());
+    const candidateCompanies = getRandomCompanies().split(',').map(c => c.trim());
 
-    // Resume text: "a couple of resumes" if < 10, else actual number
-    const formatResumes = (count: number) => count < 10 ? 'a couple of resumes' : `${count}`;
+    // Format reach number (e.g., 27900 -> "27.9k")
+    const formatReach = (value: number): string => {
+      if (value >= 1000) {
+        return (value / 1000).toFixed(1) + 'k';
+      }
+      return value.toString();
+    };
 
-    if (type === 'company' && companyData && companyData.roles.length > 1) {
+    if (type === 'company' && companyData) {
       // TYPE 1: Company-level update
+      const totalInterest = companyData.roles.reduce((sum, r) => sum + r.metrics.landingPageClicks, 0);
+
       const lines: string[] = [];
-      lines.push('Updates from Round1AI Team');
+      lines.push('*Updates from Round1AI Team*');
+      lines.push(`*${company}* (${days} day${days > 1 ? 's' : ''} update)`);
       lines.push('');
-      lines.push(`${company} (${days} day update)`);
+      lines.push(`*${companyData.totalInterviewMinutes} Minutes* of AI Interview were conducted`);
+      lines.push(`*${companyData.totalResumes}+* resumes received`);
+      lines.push(`*${totalInterest}+* people showed interest`);
+      lines.push(`*${formatReach(companyData.totalImpressions)}* reach across our candidate network`);
       lines.push('');
-      lines.push(`AI interviews conducted: ${companyData.totalInterviewMinutes} minutes`);
-      lines.push(`Resumes received: ${formatResumes(companyData.totalResumes)}`);
-      lines.push(`Page visits: ${metrics.landingPageClicks}+`);
-      lines.push(`Reach across candidate network: ~${formatNumber(metrics.impressions)}`);
-      lines.push('');
-      lines.push('Role-wise breakdown:');
 
+      // Role-wise breakdown
+      lines.push('*Role-wise breakdown:*');
       companyData.roles.forEach(r => {
-        const roleResumes = r.matchedResumes < 10 ? 'a couple' : r.matchedResumes;
-        lines.push(`${r.role}: ${roleResumes} resumes, ${r.interviewMinutes} min of AI interviews`);
+        lines.push(`• ${r.role}: ${r.matchedResumes} resumes, ${r.interviewMinutes} min AI interviews`);
       });
-
       lines.push('');
-      if (companies.length > 0) {
-        lines.push(`Candidates showing interest from: ${companies.join(', ')}`);
+
+      if (candidateCompanies.length > 0) {
+        lines.push(`Candidates showing interest from: *${candidateCompanies.join(', ')}*`);
         lines.push('');
       }
-      lines.push('Evaluating resumes. Shortlist coming shortly.');
-      lines.push('');
-      lines.push('Best,');
-      lines.push('Round1AI Team');
+      lines.push('Our AI Agents are evaluating candidates. We are sharing shortlist soon.');
 
       return lines.join('\n');
     } else {
       // TYPE 2: Role-level update
       const lines: string[] = [];
-      lines.push('Updates from Round1AI Team');
+      lines.push('*Updates from Round1AI Team*');
+      lines.push(`*${role}*, ${company} (${days} day${days > 1 ? 's' : ''} update)`);
       lines.push('');
-      lines.push(`${role}, ${company} (${days} day update)`);
+      lines.push(`*${metrics.interviewMinutes} Minutes* of AI Interview were conducted`);
+      lines.push(`*${metrics.totalResumes}+* resumes received`);
+      lines.push(`*${metrics.landingPageClicks}+* people showed interest`);
+      lines.push(`*${formatReach(metrics.impressions)}* reach across our candidate network`);
       lines.push('');
-      lines.push(`AI interviews conducted: ${metrics.interviewMinutes} minutes`);
-      lines.push(`Resumes received: ${formatResumes(metrics.totalResumes)}`);
-      lines.push(`Page visits: ${metrics.landingPageClicks}+`);
-      lines.push(`Reach across candidate network: ~${formatNumber(metrics.impressions)}`);
-      lines.push('');
-      if (companies.length > 0) {
-        lines.push(`Candidates showing interest from: ${companies.join(', ')}`);
+      if (candidateCompanies.length > 0) {
+        lines.push(`Candidates showing interest from: *${candidateCompanies.join(', ')}*`);
         lines.push('');
       }
-      lines.push('Evaluating resumes. Shortlist coming shortly.');
-      lines.push('');
-      lines.push('Best,');
-      lines.push('Round1AI Team');
+      lines.push('Our AI Agents are evaluating candidates. We are sharing shortlist soon.');
 
       return lines.join('\n');
     }
