@@ -91,10 +91,13 @@ const {
 
 // Load token from environment variable (production) or file (development)
 let accessToken: string | null = null;
+let refreshToken: string | null = null;
+let tokenExpiresAt: number | null = null;
 
 // First check environment variable (for production)
 if (process.env.LINKEDIN_ACCESS_TOKEN) {
   accessToken = process.env.LINKEDIN_ACCESS_TOKEN;
+  refreshToken = process.env.LINKEDIN_REFRESH_TOKEN || null;
   console.log('Loaded access token from environment variable');
 } else {
   // Fall back to file (for development)
@@ -102,16 +105,93 @@ if (process.env.LINKEDIN_ACCESS_TOKEN) {
     if (fs.existsSync(TOKEN_FILE)) {
       const data = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8'));
       accessToken = data.access_token;
+      refreshToken = data.refresh_token || null;
+      tokenExpiresAt = data.expires_at || null;
       console.log('Loaded access token from file');
+      if (refreshToken) {
+        console.log('Refresh token available for auto-renewal');
+      }
     }
   } catch (e) {
     console.log('No saved token found');
   }
 }
 
-// Save token to file
-function saveToken(token: string) {
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token: token }));
+// Save token to file (with optional refresh token and expiry)
+function saveToken(token: string, refresh?: string, expiresIn?: number) {
+  const data: any = { access_token: token };
+  if (refresh) {
+    data.refresh_token = refresh;
+  } else if (refreshToken) {
+    // Preserve existing refresh token if not provided
+    data.refresh_token = refreshToken;
+  }
+  if (expiresIn) {
+    data.expires_at = Date.now() + expiresIn * 1000;
+    tokenExpiresAt = data.expires_at;
+  }
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2));
+}
+
+// Refresh access token using refresh token
+async function refreshAccessToken(): Promise<boolean> {
+  if (!refreshToken) {
+    console.log('No refresh token available');
+    return false;
+  }
+
+  try {
+    console.log('Attempting to refresh access token...');
+    const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: LINKEDIN_CLIENT_ID!,
+      client_secret: LINKEDIN_CLIENT_SECRET!,
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+
+    const data = await response.json();
+
+    if (data.access_token) {
+      accessToken = data.access_token;
+      // LinkedIn may return a new refresh token
+      if (data.refresh_token) {
+        refreshToken = data.refresh_token;
+      }
+      saveToken(accessToken!, refreshToken || undefined, data.expires_in);
+      console.log('Access token refreshed successfully');
+      return true;
+    } else {
+      console.error('Token refresh failed:', data);
+      return false;
+    }
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    return false;
+  }
+}
+
+// Check if token needs refresh (5 minutes before expiry)
+function tokenNeedsRefresh(): boolean {
+  if (!tokenExpiresAt) return false;
+  const fiveMinutes = 5 * 60 * 1000;
+  return Date.now() > tokenExpiresAt - fiveMinutes;
+}
+
+// Middleware to auto-refresh token if needed
+async function ensureValidToken(): Promise<boolean> {
+  if (!accessToken) return false;
+
+  if (tokenNeedsRefresh() && refreshToken) {
+    return await refreshAccessToken();
+  }
+  return true;
 }
 
 // ============== Authentication Routes ==============
@@ -282,9 +362,18 @@ app.post('/api/linkedin/token', async (req, res) => {
 
     if (data.access_token) {
       accessToken = data.access_token;
-      saveToken(accessToken!);
+      // Store refresh token if provided by LinkedIn
+      if (data.refresh_token) {
+        refreshToken = data.refresh_token;
+        console.log('Refresh token obtained - auto-renewal enabled');
+      }
+      saveToken(accessToken!, data.refresh_token, data.expires_in);
       console.log('Access token obtained and saved');
-      res.json({ access_token: data.access_token, expires_in: data.expires_in });
+      res.json({
+        access_token: data.access_token,
+        expires_in: data.expires_in,
+        has_refresh_token: !!data.refresh_token,
+      });
     } else {
       console.error('Token error:', data);
       res.status(400).json({ error: data.error_description || 'Failed to get token' });
@@ -328,12 +417,21 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
     return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
   }
 
+  // Auto-refresh token if needed
+  if (tokenNeedsRefresh() && refreshToken) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      return res.status(401).json({ error: 'Token expired. Please reconnect LinkedIn.' });
+    }
+  }
+
   const now = Date.now();
   if (legacyCampaignCache.data && now - legacyCampaignCache.timestamp < LEGACY_CACHE_TTL) {
     return res.json(legacyCampaignCache.data);
   }
 
-  try {
+  // Helper function to fetch campaigns with retry on token error
+  const fetchCampaigns = async (retryOnAuthError = true): Promise<{ success: boolean; data?: any; error?: string }> => {
     const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
     let allCampaigns: any[] = [];
     let start = 0;
@@ -350,18 +448,42 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
       });
 
       const data = await response.json();
+
+      // Check for token errors (revoked, expired, invalid)
+      if (response.status === 401 || (data.message && data.message.includes('revoked'))) {
+        if (retryOnAuthError && refreshToken) {
+          console.log('Token error detected, attempting refresh...');
+          const refreshed = await refreshAccessToken();
+          if (refreshed) {
+            return fetchCampaigns(false); // Retry once after refresh
+          }
+        }
+        return { success: false, error: 'Token expired or revoked. Please reconnect LinkedIn.' };
+      }
+
       if (response.ok && data.elements) {
         allCampaigns = allCampaigns.concat(data.elements);
         hasMore = data.elements.length >= count && start < 5000;
         start += count;
       } else {
         hasMore = false;
+        if (!response.ok) {
+          return { success: false, error: data.message || 'Failed to fetch campaigns' };
+        }
       }
     }
 
-    const result = { elements: allCampaigns, total: allCampaigns.length };
-    legacyCampaignCache = { data: result, timestamp: now };
-    res.json(result);
+    return { success: true, data: { elements: allCampaigns, total: allCampaigns.length } };
+  };
+
+  try {
+    const result = await fetchCampaigns();
+    if (result.success && result.data) {
+      legacyCampaignCache = { data: result.data, timestamp: now };
+      res.json(result.data);
+    } else {
+      res.status(401).json({ error: result.error });
+    }
   } catch (error) {
     console.error('Campaigns fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch campaigns' });
@@ -371,6 +493,14 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
 app.get('/api/linkedin/analytics', async (req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
+  }
+
+  // Auto-refresh token if needed
+  if (tokenNeedsRefresh() && refreshToken) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      return res.status(401).json({ error: 'Token expired. Please reconnect LinkedIn.' });
+    }
   }
 
   try {
@@ -974,6 +1104,91 @@ app.patch('/api/linkedin/creatives/:id/status', async (req, res) => {
   } catch (error) {
     console.error('Creative update error:', error);
     res.status(500).json({ error: 'Failed to update creative' });
+  }
+});
+
+// Create a new creative
+app.post('/api/linkedin/creatives/create', async (req, res) => {
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  try {
+    const { campaignId, name, headline, description, callToAction, destinationUrl } = req.body;
+
+    if (!campaignId || !destinationUrl) {
+      return res.status(400).json({ error: 'Campaign ID and destination URL are required' });
+    }
+
+    const accountUrn = `urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`;
+    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+
+    // Create a simple text ad creative
+    const creativePayload = {
+      account: accountUrn,
+      campaign: campaignUrn,
+      status: 'ACTIVE',
+      type: 'SPONSORED_STATUS_UPDATE',
+      variables: {
+        data: {
+          'com.linkedin.ads.SponsoredUpdateCreativeVariables': {
+            activity: `urn:li:activity:${Date.now()}`, // Placeholder - in production you'd create a share first
+            directSponsoredContent: true,
+            share: {
+              content: {
+                contentEntities: [{
+                  landingPageUrl: destinationUrl,
+                }],
+                title: headline || name,
+                description: description || '',
+              },
+              text: {
+                text: description || headline || name,
+              },
+            },
+          },
+        },
+      },
+      callToAction: {
+        labelType: callToAction || 'LEARN_MORE',
+      },
+    };
+
+    console.log('Creating creative:', JSON.stringify(creativePayload, null, 2));
+
+    const response = await fetch('https://api.linkedin.com/v2/adCreativesV2', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(creativePayload),
+    });
+
+    const responseText = await response.text();
+
+    if (response.ok || response.status === 201) {
+      // Extract creative ID from Location header or response
+      const locationHeader = response.headers.get('x-restli-id') || response.headers.get('location');
+      const creativeId = locationHeader || 'created';
+
+      res.json({
+        success: true,
+        message: 'Creative created successfully',
+        creativeId,
+        details: responseText ? JSON.parse(responseText) : null,
+      });
+    } else {
+      console.error('Creative creation failed:', responseText);
+      res.status(response.status).json({
+        error: 'Failed to create creative',
+        details: responseText,
+      });
+    }
+  } catch (error: any) {
+    console.error('Creative creation error:', error);
+    res.status(500).json({ error: error.message || 'Failed to create creative' });
   }
 });
 
