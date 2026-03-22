@@ -756,7 +756,6 @@ export function CampaignROI(_props: CampaignROIProps) {
   // Calculate stats from available data
   const matchedCampaigns = batches.batches.reduce((sum, b) => sum + b.campaigns.length, 0);
   const unmatchedCampaigns = batches.ungrouped.length;
-  const totalCampaigns = matchedCampaigns + unmatchedCampaigns;
 
   // Resume campaigns spend (batched + ungrouped, excludes WhatsApp since they're separated in backend)
   const resumeCampaignsSpend = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalSpend, 0) +
