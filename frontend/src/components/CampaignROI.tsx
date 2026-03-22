@@ -1025,15 +1025,6 @@ export function CampaignROI(_props: CampaignROIProps) {
             labelColor="text-blue-600"
           />
 
-          <SummaryBarDivider />
-
-          <MetricBlock
-            label="WHATSAPP"
-            value={formatCurrency(whatsappSpend)}
-            subtext={`${whatsappCampaigns.length} campaigns`}
-            labelColor="text-emerald-600"
-          />
-
           <div className="flex-1" />
 
           {/* Date indicator - right aligned */}
