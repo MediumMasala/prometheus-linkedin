@@ -58,6 +58,22 @@ import {
   getCacheStatus,
   CACHE_CONFIG,
 } from './lib/analysis-cache.js';
+import {
+  loadAccounts,
+  getAllAccounts,
+  getAccountById,
+  getDefaultAccount,
+  createAccount,
+  updateAccount,
+  deleteAccount,
+  setDefaultAccount,
+  updateAccountTokens,
+  refreshAccountToken,
+  migrateFromLegacyToken,
+  getValidAccessToken,
+} from './lib/linkedin-accounts.js';
+import { resolveAccount, optionalAccount, type AccountRequest } from './lib/account-middleware.js';
+import crypto from 'crypto';
 import cron from 'node-cron';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -98,7 +114,13 @@ let tokenExpiresAt: number | null = null;
 if (process.env.LINKEDIN_ACCESS_TOKEN) {
   accessToken = process.env.LINKEDIN_ACCESS_TOKEN;
   refreshToken = process.env.LINKEDIN_REFRESH_TOKEN || null;
-  console.log('Loaded access token from environment variable');
+  console.log('✅ Loaded access token from environment variable');
+  if (refreshToken) {
+    console.log('✅ Refresh token loaded - automatic token renewal enabled');
+  } else {
+    console.log('⚠️  WARNING: No LINKEDIN_REFRESH_TOKEN set - you will need to manually reconnect when token expires');
+    console.log('   To fix: Re-authenticate locally and copy both tokens to your environment variables');
+  }
 } else {
   // Fall back to file (for development)
   try {
@@ -398,41 +420,415 @@ app.get('/api/linkedin/token-info', (req: AuthRequest, res) => {
   }
   // Only show partial token for security
   const masked = accessToken.substring(0, 20) + '...' + accessToken.substring(accessToken.length - 10);
-  res.json({
+
+  const response: any = {
     hasToken: true,
     maskedToken: masked,
     fullToken: accessToken, // Only accessible to authenticated users
-    message: 'Copy the fullToken value to LINKEDIN_ACCESS_TOKEN env var in production',
+    hasRefreshToken: !!refreshToken,
+    expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : null,
+    message: 'Copy these values to your production environment variables:',
+    envVars: {
+      LINKEDIN_ACCESS_TOKEN: accessToken,
+    }
+  };
+
+  if (refreshToken) {
+    response.envVars.LINKEDIN_REFRESH_TOKEN = refreshToken;
+    response.refreshTokenMasked = refreshToken.substring(0, 20) + '...' + refreshToken.substring(refreshToken.length - 10);
+  } else {
+    response.warning = 'No refresh token! Re-authenticate with the new OAuth flow to get automatic token renewal.';
+  }
+
+  res.json(response);
+});
+
+// ============== LinkedIn Multi-Account Management ==============
+
+// Store pending OAuth states for multi-account flow
+const pendingOAuthStates = new Map<string, {
+  accountName: string;
+  userEmail: string;
+  createdAt: number;
+  existingAccountId?: string; // For authorizing existing accounts
+}>();
+
+// Clean up old OAuth states every minute
+setInterval(() => {
+  const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+  for (const [state, data] of pendingOAuthStates.entries()) {
+    if (data.createdAt < tenMinutesAgo) {
+      pendingOAuthStates.delete(state);
+    }
+  }
+}, 60000);
+
+// List all LinkedIn accounts
+app.get('/api/linkedin/accounts', (req: AuthRequest, res) => {
+  const accounts = getAllAccounts();
+  const defaultAccount = getDefaultAccount();
+  res.json({
+    accounts,
+    defaultAccountId: defaultAccount?.id || null,
   });
+});
+
+// Get single account details
+app.get('/api/linkedin/accounts/:id', (req: AuthRequest, res) => {
+  const account = getAccountById(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+  // Don't expose tokens
+  const { accessToken: _, refreshToken: __, ...safeAccount } = account;
+  res.json(safeAccount);
+});
+
+// Initiate OAuth for new account (admin only)
+app.post('/api/linkedin/accounts', requireAdmin, (req: AuthRequest, res) => {
+  const { accountName } = req.body;
+
+  if (!accountName) {
+    return res.status(400).json({ error: 'Account name is required' });
+  }
+
+  // Generate state for OAuth security
+  const state = crypto.randomBytes(16).toString('hex');
+  pendingOAuthStates.set(state, {
+    accountName,
+    userEmail: req.user!.email,
+    createdAt: Date.now(),
+  });
+
+  // Build auth URL with state
+  const origin = req.headers.origin || 'http://localhost:5173';
+  const redirectUri = `${origin}/callback`;
+  const scopes = ['r_ads', 'r_ads_reporting', 'rw_ads'].join('%20');
+
+  const authUrl = `https://www.linkedin.com/oauth/v2/authorization?` +
+    `response_type=code&` +
+    `client_id=${LINKEDIN_CLIENT_ID}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `scope=${scopes}&` +
+    `state=${state}`;
+
+  res.json({ authUrl, state, redirectUri });
+});
+
+// Complete OAuth and create account (admin only)
+app.post('/api/linkedin/accounts/complete', requireAdmin, async (req: AuthRequest, res) => {
+  const { code, state, redirectUri, adAccountId } = req.body;
+
+  if (!code || !state) {
+    return res.status(400).json({ error: 'Code and state are required' });
+  }
+
+  // Validate state
+  const pendingState = pendingOAuthStates.get(state);
+  if (!pendingState) {
+    return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+  }
+  pendingOAuthStates.delete(state);
+
+  try {
+    // Exchange code for token
+    const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: LINKEDIN_CLIENT_ID!,
+      client_secret: LINKEDIN_CLIENT_SECRET!,
+      redirect_uri: redirectUri || 'http://localhost:5173/callback',
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+
+    const data = await response.json();
+
+    if (!data.access_token) {
+      console.error('OAuth error:', data);
+      return res.status(400).json({ error: data.error_description || 'OAuth failed' });
+    }
+
+    // Create the account
+    const account = createAccount({
+      accountName: pendingState.accountName,
+      adAccountId: adAccountId || '',
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      tokenExpiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+      isDefault: false,
+      createdBy: pendingState.userEmail,
+    });
+
+    // Return safe account data
+    const { accessToken: _, refreshToken: __, ...safeAccount } = account;
+    res.json({
+      account: safeAccount,
+      needsAdAccount: !adAccountId,
+      message: adAccountId ? 'Account created successfully' : 'Account created. Now select an Ad Account.',
+    });
+  } catch (error) {
+    console.error('OAuth completion error:', error);
+    res.status(500).json({ error: 'OAuth completion failed' });
+  }
+});
+
+// Get available Ad Accounts for a connected token (admin only)
+app.get('/api/linkedin/accounts/:id/ad-accounts', requireAdmin, async (req: AuthRequest, res) => {
+  const account = getAccountById(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+
+  try {
+    const accessToken = await getValidAccessToken(account.id);
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Token expired. Please reconnect.' });
+    }
+
+    const response = await fetch(
+      'https://api.linkedin.com/v2/adAccountsV2?q=search&search=(status:(values:List(ACTIVE)))&count=100',
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    if (response.ok && data.elements) {
+      const adAccounts = data.elements.map((acc: any) => ({
+        id: String(acc.id),
+        name: acc.name,
+        status: acc.status,
+        currency: acc.currency,
+      }));
+      res.json({ adAccounts });
+    } else {
+      res.status(response.status).json({ error: data.message || 'Failed to fetch ad accounts' });
+    }
+  } catch (error) {
+    console.error('Ad accounts fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch ad accounts' });
+  }
+});
+
+// Update account (admin only)
+app.patch('/api/linkedin/accounts/:id', requireAdmin, (req: AuthRequest, res) => {
+  const { accountName, adAccountId, isDefault } = req.body;
+
+  const updated = updateAccount(req.params.id, {
+    ...(accountName && { accountName }),
+    ...(adAccountId && { adAccountId }),
+    ...(isDefault !== undefined && { isDefault }),
+  });
+
+  if (!updated) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+
+  const { accessToken: _, refreshToken: __, ...safeAccount } = updated;
+  res.json(safeAccount);
+});
+
+// Delete account (admin only)
+app.delete('/api/linkedin/accounts/:id', requireAdmin, (req: AuthRequest, res) => {
+  const deleted = deleteAccount(req.params.id);
+  if (!deleted) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+  res.json({ success: true });
+});
+
+// Set default account (admin only)
+app.post('/api/linkedin/accounts/:id/set-default', requireAdmin, (req: AuthRequest, res) => {
+  const success = setDefaultAccount(req.params.id);
+  if (!success) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+  res.json({ success: true });
+});
+
+// Refresh account token manually (admin only)
+app.post('/api/linkedin/accounts/:id/refresh', requireAdmin, async (req: AuthRequest, res) => {
+  const account = getAccountById(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+
+  if (!account.refreshToken) {
+    return res.status(400).json({ error: 'No refresh token available for this account' });
+  }
+
+  const success = await refreshAccountToken(req.params.id);
+  if (success) {
+    const updated = getAccountById(req.params.id);
+    res.json({
+      success: true,
+      expiresAt: updated?.tokenExpiresAt ? new Date(updated.tokenExpiresAt).toISOString() : null,
+    });
+  } else {
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
+// Authorize an existing account (get OAuth URL for account with its own credentials)
+app.get('/api/linkedin/accounts/:id/authorize', requireAdmin, (req: AuthRequest, res) => {
+  const account = getAccountById(req.params.id);
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+
+  if (!account.clientId) {
+    return res.status(400).json({ error: 'Account does not have OAuth credentials configured' });
+  }
+
+  // Generate state for OAuth security
+  const state = crypto.randomBytes(16).toString('hex');
+  pendingOAuthStates.set(state, {
+    accountName: account.accountName,
+    userEmail: req.user!.email,
+    createdAt: Date.now(),
+    existingAccountId: account.id, // Mark this as updating an existing account
+  });
+
+  const origin = req.headers.origin || 'http://localhost:5173';
+  const redirectUri = `${origin}/callback`;
+  const scopes = ['r_ads', 'r_ads_reporting', 'rw_ads'].join('%20');
+
+  const authUrl = `https://www.linkedin.com/oauth/v2/authorization?` +
+    `response_type=code&` +
+    `client_id=${account.clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `scope=${scopes}&` +
+    `state=${state}`;
+
+  res.json({ authUrl, state, redirectUri, accountId: account.id, accountName: account.accountName });
+});
+
+// Complete OAuth for existing account
+app.post('/api/linkedin/accounts/:id/authorize', requireAdmin, async (req: AuthRequest, res) => {
+  const { code, redirectUri } = req.body;
+  const account = getAccountById(req.params.id);
+
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+
+  if (!account.clientId || !account.clientSecret) {
+    return res.status(400).json({ error: 'Account does not have OAuth credentials' });
+  }
+
+  try {
+    const tokenUrl = 'https://www.linkedin.com/oauth/v2/accessToken';
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: account.clientId,
+      client_secret: account.clientSecret,
+      redirect_uri: redirectUri || 'http://localhost:5173/callback',
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+
+    const data = await response.json();
+
+    if (!data.access_token) {
+      console.error('OAuth error:', data);
+      return res.status(400).json({ error: data.error_description || 'OAuth failed' });
+    }
+
+    // Update the account with new tokens
+    updateAccountTokens(
+      account.id,
+      data.access_token,
+      data.refresh_token,
+      data.expires_in
+    );
+
+    // Clear needsAuth flag
+    updateAccount(account.id, { needsAuth: false } as any);
+
+    const updated = getAccountById(account.id);
+    res.json({
+      success: true,
+      accountName: account.accountName,
+      expiresAt: updated?.tokenExpiresAt ? new Date(updated.tokenExpiresAt).toISOString() : null,
+      hasRefreshToken: !!data.refresh_token,
+    });
+  } catch (error) {
+    console.error('OAuth completion error:', error);
+    res.status(500).json({ error: 'OAuth completion failed' });
+  }
 });
 
 // ============== Legacy LinkedIn Routes (for existing frontend) ==============
 
-// Campaign cache for legacy endpoints
-let legacyCampaignCache: { data: any; timestamp: number } = { data: null, timestamp: 0 };
+// Campaign cache for legacy endpoints (per-account)
+let legacyCampaignCache: any = {};
 const LEGACY_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
-app.get('/api/linkedin/campaigns', async (req, res) => {
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
-  }
+app.get('/api/linkedin/campaigns', async (req: AccountRequest, res) => {
+  // Get account context from query param or use default
+  const requestedAccountId = req.query.accountId as string;
+  let adAccountId: string;
+  let accountAccessToken: string;
 
-  // Auto-refresh token if needed
-  if (tokenNeedsRefresh() && refreshToken) {
-    const refreshed = await refreshAccessToken();
-    if (!refreshed) {
-      return res.status(401).json({ error: 'Token expired. Please reconnect LinkedIn.' });
+  if (requestedAccountId) {
+    const account = getAccountById(requestedAccountId);
+    if (!account) {
+      return res.status(404).json({ error: 'LinkedIn account not found' });
+    }
+    const token = await getValidAccessToken(requestedAccountId);
+    if (!token) {
+      return res.status(401).json({ error: 'Token expired for this account. Please reconnect.' });
+    }
+    adAccountId = account.adAccountId;
+    accountAccessToken = token;
+  } else {
+    // Fall back to default account or legacy
+    const defaultAccount = getDefaultAccount();
+    if (defaultAccount) {
+      const token = await getValidAccessToken(defaultAccount.id);
+      if (token) {
+        adAccountId = defaultAccount.adAccountId;
+        accountAccessToken = token;
+      } else if (accessToken) {
+        adAccountId = LINKEDIN_AD_ACCOUNT_ID!;
+        accountAccessToken = accessToken;
+      } else {
+        return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
+      }
+    } else if (accessToken) {
+      adAccountId = LINKEDIN_AD_ACCOUNT_ID!;
+      accountAccessToken = accessToken;
+    } else {
+      return res.status(401).json({ error: 'Not authenticated. Please connect LinkedIn first.' });
     }
   }
 
   const now = Date.now();
-  if (legacyCampaignCache.data && now - legacyCampaignCache.timestamp < LEGACY_CACHE_TTL) {
-    return res.json(legacyCampaignCache.data);
+  const cacheKey = `campaigns_${adAccountId}`;
+
+  // Check cache per account
+  if ((legacyCampaignCache as any)[cacheKey]?.data && now - (legacyCampaignCache as any)[cacheKey]?.timestamp < LEGACY_CACHE_TTL) {
+    return res.json((legacyCampaignCache as any)[cacheKey].data);
   }
 
   // Helper function to fetch campaigns with retry on token error
   const fetchCampaigns = async (retryOnAuthError = true): Promise<{ success: boolean; data?: any; error?: string }> => {
-    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${LINKEDIN_AD_ACCOUNT_ID}`);
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${adAccountId}`);
     let allCampaigns: any[] = [];
     let start = 0;
     const count = 100;
@@ -442,7 +838,7 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
       const url = `https://api.linkedin.com/v2/adCampaignsV2?q=search&search=(account:(values:List(${accountUrn})))&start=${start}&count=${count}`;
       const response = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accountAccessToken}`,
           'X-Restli-Protocol-Version': '2.0.0',
         },
       });
@@ -451,13 +847,6 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
 
       // Check for token errors (revoked, expired, invalid)
       if (response.status === 401 || (data.message && data.message.includes('revoked'))) {
-        if (retryOnAuthError && refreshToken) {
-          console.log('Token error detected, attempting refresh...');
-          const refreshed = await refreshAccessToken();
-          if (refreshed) {
-            return fetchCampaigns(false); // Retry once after refresh
-          }
-        }
         return { success: false, error: 'Token expired or revoked. Please reconnect LinkedIn.' };
       }
 
@@ -479,7 +868,7 @@ app.get('/api/linkedin/campaigns', async (req, res) => {
   try {
     const result = await fetchCampaigns();
     if (result.success && result.data) {
-      legacyCampaignCache = { data: result.data, timestamp: now };
+      (legacyCampaignCache as any)[cacheKey] = { data: result.data, timestamp: now };
       res.json(result.data);
     } else {
       res.status(401).json({ error: result.error });
@@ -2376,6 +2765,9 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     linkedInConnected: !!accessToken,
+    linkedInRefreshTokenAvailable: !!refreshToken,
+    linkedInTokenExpiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : null,
+    tokenSource: process.env.LINKEDIN_ACCESS_TOKEN ? 'environment' : (accessToken ? 'file' : 'none'),
     adAccountId: LINKEDIN_AD_ACCOUNT_ID,
     talAdAccountId: TAL_LINKEDIN_AD_ACCOUNT_ID,
     mastraEnabled: true,
@@ -2509,15 +2901,31 @@ if (isProduction) {
 
 // ============== Start Server ==============
 
+// Migrate legacy token to multi-account system on startup
+const accountsData = loadAccounts();
+if (accountsData.accounts.length === 0 && !accountsData.migratedFromLegacy && accessToken) {
+  console.log('[Startup] Migrating legacy token to multi-account system...');
+  const migrated = migrateFromLegacyToken('admin');
+  if (migrated) {
+    console.log(`[Startup] Migrated to account: ${migrated.accountName}`);
+  }
+}
+
 app.listen(PORT, () => {
+  const accounts = getAllAccounts();
+  const defaultAccount = getDefaultAccount();
+
   console.log(`\n🔥 Prometheus server running on http://localhost:${PORT}`);
   console.log(`📊 Mastra agent: Prometheus (LinkedIn Campaign Analyzer)`);
-  console.log(`🔗 LinkedIn connected: ${!!accessToken}`);
+  console.log(`🔗 LinkedIn accounts: ${accounts.length} configured`);
+  if (defaultAccount) {
+    console.log(`   └─ Default: ${defaultAccount.accountName} (${defaultAccount.adAccountId})`);
+  }
   console.log(`🔐 Auth: ${process.env.AUTH_DISABLED === 'true' ? 'DISABLED' : 'ENABLED'}`);
   console.log(`📢 Slack alerts: ${process.env.SLACK_WEBHOOK_URL ? 'CONFIGURED' : 'NOT CONFIGURED'}`);
-  if (!accessToken) {
+  if (accounts.length === 0 && !accessToken) {
     console.log(`\n⚠️  To connect LinkedIn, visit:`);
-    console.log(`   http://localhost:${PORT}/api/linkedin/auth-url`);
+    console.log(`   http://localhost:${PORT} and add an account`);
   }
   console.log('\n');
 });

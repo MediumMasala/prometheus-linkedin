@@ -1,3 +1,32 @@
+// LinkedIn Account Types (Multi-account support)
+export interface LinkedInAccount {
+  id: string;
+  accountName: string;
+  adAccountId: string;
+  clientId?: string;
+  clientSecret?: string;
+  accessToken: string;
+  refreshToken?: string;
+  tokenExpiresAt?: number | null;
+  isDefault: boolean;
+  createdAt: string;
+  createdBy: string;
+  needsAuth?: boolean;
+}
+
+export interface LinkedInAccountsData {
+  accounts: LinkedInAccount[];
+  version: number;
+  migratedFromLegacy?: boolean;
+}
+
+// LinkedIn API Context (for multi-account API calls)
+export interface LinkedInApiContext {
+  accountId: string;
+  adAccountId: string;
+  accessToken: string;
+}
+
 // LinkedIn Campaign Types
 export interface LinkedInCampaign {
   campaignId: string;

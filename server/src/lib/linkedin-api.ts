@@ -2,7 +2,7 @@ import type { LinkedInCampaign, LinkedInFetchInput } from '../types/index.js';
 
 const LINKEDIN_API_BASE = 'https://api.linkedin.com/v2';
 
-// Cache for LinkedIn data (1 hour TTL) - keyed by date range
+// Cache for LinkedIn data (1 hour TTL) - keyed by accountId + date range
 const campaignCacheMap = new Map<string, {
   data: LinkedInCampaign[];
   timestamp: number;
@@ -15,8 +15,8 @@ export async function fetchLinkedInCampaigns(
 ): Promise<LinkedInCampaign[]> {
   const { accountId, dateRange, statuses } = input;
 
-  // Create cache key based on date range
-  const cacheKey = `${dateRange?.start || 'all'}_${dateRange?.end || 'all'}`;
+  // Create cache key based on accountId + date range
+  const cacheKey = `${accountId}_${dateRange?.start || 'all'}_${dateRange?.end || 'all'}`;
   const now = Date.now();
   const cached = campaignCacheMap.get(cacheKey);
 
@@ -156,4 +156,13 @@ export async function fetchLinkedInCampaigns(
 
 export function clearLinkedInCache() {
   campaignCacheMap.clear();
+}
+
+// Clear cache for a specific account
+export function clearAccountCache(accountId: string) {
+  for (const key of campaignCacheMap.keys()) {
+    if (key.startsWith(`${accountId}_`)) {
+      campaignCacheMap.delete(key);
+    }
+  }
 }
