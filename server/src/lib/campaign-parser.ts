@@ -98,6 +98,8 @@ const ROLE_PATTERNS = [
   /^intern(ship)?$/i,
   /^trainee$/i,
   /^fresher$/i,
+  /^cos$/i, // Chief of Staff
+  /^chief\s+of\s+staff$/i,
 ];
 
 /**
@@ -347,6 +349,7 @@ export function normalizeRole(role: string): string {
     [/^qa$/i, 'QA Engineer'],
     [/^sdet$/i, 'SDET'],
     [/^ml$/i, 'Machine Learning'],
+    [/^cos$/i, 'Chief of Staff'],
   ];
 
   for (const [pattern, expansion] of expansions) {

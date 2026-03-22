@@ -213,6 +213,7 @@ export function rolesMatch(role1: string, role2: string): boolean {
     ['product', 'pm', 'product manager'],
     ['senior', 'sr', 'lead', 'principal'],
     ['intern', 'internship', 'trainee'],
+    ['cos', 'chief of staff'],
   ];
 
   for (const group of synonymGroups) {
