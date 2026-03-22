@@ -791,6 +791,11 @@ export function CampaignROI(_props: CampaignROIProps) {
   // CORRECT totals: Resume campaigns + WhatsApp = Total LinkedIn spend
   const totalSpend = resumeCampaignsSpend + whatsappSpend;
   const paidSpend = resumeCampaignsSpend; // Paid = Resume acquisition campaigns (already excludes WhatsApp)
+
+  // Count active campaigns only (for display)
+  const activeCampaignsCount = batches.batches.reduce(
+    (sum, b) => sum + b.campaigns.filter(c => c.status === 'ACTIVE').length, 0
+  ) + batches.ungrouped.filter((c: any) => c.status === 'ACTIVE').length;
   const paidImpressions = batches.batches.reduce((sum, b) => sum + b.aggregatedMetrics.totalImpressions, 0) +
     batches.ungrouped.reduce((sum, c) => sum + (c.impressions || 0), 0);
   const paidLPClicks = totalClicks; // LP clicks from paid campaigns
@@ -1017,8 +1022,8 @@ export function CampaignROI(_props: CampaignROIProps) {
 
           <MetricBlock
             label="PAID (RESUME)"
-            value={formatCurrency(paidSpend)}
-            subtext={`${totalCampaigns} campaigns`}
+            value={paidResumes}
+            subtext={`${activeCampaignsCount} active campaigns`}
             labelColor="text-blue-600"
           />
 
