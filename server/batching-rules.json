@@ -368,6 +368,182 @@
       "source": "manual",
       "approved": true,
       "approvedAt": "2026-03-05T12:58:34.632721Z"
+    },
+    "Chronic - Presentation Designer": {
+      "company": "Chronic",
+      "role": "Presentation Designer",
+      "batchId": "chronic-presentation-designer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Chronic - Presentation Designer - Pedigree": {
+      "company": "Chronic",
+      "role": "Presentation Designer",
+      "batchId": "chronic-presentation-designer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Chronic - Presentation Designer - Company TG": {
+      "company": "Chronic",
+      "role": "Presentation Designer",
+      "batchId": "chronic-presentation-designer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Chronic - Presentation Designer - JT": {
+      "company": "Chronic",
+      "role": "Presentation Designer",
+      "batchId": "chronic-presentation-designer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - Chief of Staff": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - Chief of Staff - Pedigree": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - Chief of Staff - Company TG": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - COS": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - COS - Pedigree": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - COS - Company TG": {
+      "company": "Waterlabs AI",
+      "role": "Chief of Staff",
+      "batchId": "waterlabs-ai-chief-of-staff",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Superliving - AI Engineer": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Superliving - AI Engineer - Pedigree": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Superliving - AI Engineer - Company TG": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "SuperLiving - AI Engineer": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "SuperLiving - AI Engineer - Pedigree": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "SuperLiving - AI Engineer - Company TG": {
+      "company": "SuperLiving",
+      "role": "AI Engineer",
+      "batchId": "superliving-ai-engineer",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP of Engineering": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP of Engineering - Pedigree": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP of Engineering - Company TG": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP Engineering": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP Engineering - Pedigree": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
+    },
+    "Waterlabs AI - VP Engineering - Company TG": {
+      "company": "Waterlabs AI",
+      "role": "VP of Engineering",
+      "batchId": "waterlabs-ai-vp-of-engineering",
+      "source": "manual",
+      "approved": true,
+      "approvedAt": "2026-03-22T00:00:00.000Z"
     }
   }
 }
